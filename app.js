@@ -31,6 +31,7 @@ let warnDismissed = false;
 let backupDismissed = false;
 let onlyOpen = false;      // Filter: nur ungemeldete Eintraege
 let sendQueue = [];        // ids, die nacheinander gemeldet werden
+let selectedDay = null;    // dayKey im Monatskalender, null = ganzer Monat
 
 /* ============================ speicher ============================ */
 
@@ -430,6 +431,60 @@ function lastEntry() {
   return state.entries.reduce((a, b) => (new Date(a.start) > new Date(b.start) ? a : b));
 }
 
+/** Monatsraster mit Stunden je Tag. Antippen zeigt den Tag, leere Tage legen an. */
+function renderCalendar(monthStart) {
+  const wrap = $('#calendar');
+  wrap.textContent = '';
+
+  const head = el('div', 'cal-head');
+  ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'].forEach((d) => head.appendChild(el('span', null, d)));
+  wrap.appendChild(head);
+
+  const grid = el('div', 'cal');
+  const first = new Date(monthStart.getFullYear(), monthStart.getMonth(), 1);
+  const days = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+  const lead = (first.getDay() + 6) % 7;          // Montag = 0
+  const todayKey = dayKey(new Date());
+
+  for (let i = 0; i < lead; i++) {
+    const b = el('button', 'cal-day blank');
+    b.type = 'button';
+    b.disabled = true;
+    grid.appendChild(b);
+  }
+
+  for (let n = 1; n <= days; n++) {
+    const day = new Date(first.getFullYear(), first.getMonth(), n);
+    const key = dayKey(day);
+    const items = entriesOfDay(day);
+    const min = items.reduce((sum, e) => sum + entryMin(e), 0);
+
+    const cell = el('button', 'cal-day');
+    cell.type = 'button';
+    if (items.length) cell.classList.add('has');
+    if (key === todayKey) cell.classList.add('today');
+    if (key === selectedDay) cell.classList.add('sel');
+    cell.setAttribute('aria-label', fmtDate(day));
+
+    cell.appendChild(el('span', 'cal-num', String(n)));
+    if (items.length) {
+      cell.appendChild(el('span', 'cal-h', hm(min)));
+      const open = items.some((e) => !e.sent);
+      cell.appendChild(el('span', 'cal-dot' + (open ? ' open' : '')));
+    }
+
+    cell.addEventListener('click', () => {
+      if (!items.length) { openSheet(null, { date: day }); return; }
+      selectedDay = key === selectedDay ? null : key;
+      onlyOpen = false;
+      renderHistory();
+    });
+    grid.appendChild(cell);
+  }
+
+  wrap.appendChild(grid);
+}
+
 function renderHistory() {
   const { from, to, label } = periodRange(period, periodOffset);
   $('#period-label').textContent = label + (periodOffset === 0 && period !== 'all' ? ' · aktuell' : '');
@@ -443,10 +498,25 @@ function renderHistory() {
   $('#period-hours').textContent = hm(min);
   $('#period-money').textContent = hasWage() ? money(min) : decHours(min) + ' Stunden';
 
-  const all = entriesInRange(from, to);
-  const openItems = all.filter((e) => !e.sent);
+  const showCal = period === 'month';
+  $('#calendar').classList.toggle('hidden', !showCal);
+  if (!showCal) selectedDay = null;
+  if (showCal) renderCalendar(from);
+
+  const periodAll = entriesInRange(from, to);
+  const openItems = periodAll.filter((e) => !e.sent);
   if (!openItems.length) onlyOpen = false;
-  const items = onlyOpen ? openItems : all;
+  if (onlyOpen) selectedDay = null;
+
+  const reset = $('#day-reset');
+  reset.classList.toggle('hidden', !selectedDay);
+  let base = periodAll;
+  if (selectedDay) {
+    const d = new Date(selectedDay + 'T00:00:00');
+    base = entriesOfDay(d);
+    reset.textContent = fmtDate(d);
+  }
+  const items = onlyOpen ? base.filter((e) => !e.sent) : base;
 
   const hint = $('#open-hint');
   hint.classList.toggle('hidden', openItems.length === 0);
@@ -465,7 +535,7 @@ function renderHistory() {
     if (!byDay.has(k)) byDay.set(k, []);
     byDay.get(k).push(e);
   });
-  if (!onlyOpen && runningInRange(from, to)) {
+  if (!onlyOpen && !selectedDay && runningInRange(from, to)) {
     const k = dayKey(new Date(state.running.start));
     if (!byDay.has(k)) byDay.set(k, []);
   }
@@ -481,7 +551,7 @@ function renderHistory() {
     const head = el('div', 'dayhead');
     head.appendChild(el('span', null, fmtDate(day, { weekday: 'short', day: '2-digit', month: '2-digit' })));
     const right = el('span');
-    const dayMin = onlyOpen
+    const dayMin = (onlyOpen || selectedDay)
       ? byDay.get(k).reduce((sum, e) => sum + entryMin(e), 0)
       : sumRange(startOfDay(day), addDays(startOfDay(day), 1));
     right.appendChild(el('span', 'dsum', hm(dayMin)));
@@ -489,7 +559,7 @@ function renderHistory() {
     head.append(right);
     group.appendChild(head);
 
-    if (!onlyOpen && state.running && dayKey(new Date(state.running.start)) === k) {
+    if (!onlyOpen && !selectedDay && state.running && dayKey(new Date(state.running.start)) === k) {
       group.appendChild(runningRow());
     }
     byDay.get(k).forEach((e) => group.appendChild(entryRow(e)));
@@ -499,6 +569,7 @@ function renderHistory() {
   if (!keys.length) {
     list.appendChild(el('p', 'empty', onlyOpen
       ? 'Alles gemeldet in diesem Zeitraum.'
+      : selectedDay ? 'Keine Einträge an diesem Tag.'
       : 'Keine Einträge in diesem Zeitraum.'));
   }
 }
@@ -1195,20 +1266,28 @@ function bind() {
       period = b.dataset.p;
       periodOffset = 0;
       onlyOpen = false;
+      selectedDay = null;
       renderHistory();
     }));
-  $('#open-hint').addEventListener('click', () => { onlyOpen = !onlyOpen; renderHistory(); });
+  $('#open-hint').addEventListener('click', () => {
+    onlyOpen = !onlyOpen;
+    if (onlyOpen) selectedDay = null;
+    renderHistory();
+  });
+  $('#day-reset').addEventListener('click', () => { selectedDay = null; renderHistory(); });
   $('#send-all').addEventListener('click', sendAllOpen);
   $('#send-each').addEventListener('click', startQueue);
 
-  $('#per-prev').addEventListener('click', () => { periodOffset--; renderHistory(); });
+  $('#per-prev').addEventListener('click', () => { periodOffset--; selectedDay = null; renderHistory(); });
   $('#per-next').addEventListener('click', () => {
-    if (periodOffset < 0) { periodOffset++; renderHistory(); }
+    if (periodOffset < 0) { periodOffset++; selectedDay = null; renderHistory(); }
   });
 
   $('#add-today').addEventListener('click', () => openSheet(null, { date: new Date() }));
   $('#add-any').addEventListener('click', () =>
-    openSheet(null, { date: periodRange(period, periodOffset).from }));
+    openSheet(null, {
+      date: selectedDay ? new Date(selectedDay + 'T00:00:00') : periodRange(period, periodOffset).from
+    }));
   $('#add-like-last').addEventListener('click', () => {
     const e = lastEntry();
     if (!e) { toast('Noch kein Eintrag vorhanden'); return; }

@@ -454,3 +454,79 @@ h2 { font-size: 15px; margin: 0; font-weight: 600; }
 @media (prefers-color-scheme: dark) {
   .banner.info { background: #1b2a4d; color: #bcd0ff; border-color: #2f4a86; }
 }
+
+/* ---------- monatskalender ---------- */
+.cal-wrap {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px;
+  margin-bottom: 14px;
+}
+.cal-head, .cal {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+.cal-head {
+  margin-bottom: 6px;
+}
+.cal-head span {
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted);
+}
+.cal-day {
+  position: relative;
+  min-height: 46px;
+  padding: 4px 2px 3px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 1px;
+  cursor: pointer;
+}
+.cal-day.blank { visibility: hidden; }
+.cal-num { font-size: 13px; line-height: 1.2; }
+.cal-h {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+.cal-day.has {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--text);
+}
+.cal-day.has .cal-num { font-weight: 650; }
+.cal-day.has .cal-h { color: var(--accent); font-weight: 650; }
+.cal-day.today { border-color: var(--accent); }
+.cal-day.today .cal-num { color: var(--accent); font-weight: 700; }
+.cal-day.sel {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.cal-day.sel .cal-num, .cal-day.sel .cal-h { color: #fff; }
+.cal-dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--good);
+  margin-top: 1px;
+}
+.cal-dot.open { background: #e08a00; }
+.cal-day.sel .cal-dot { background: #fff; }
+
+/* ---------- ausgewaehlter tag ---------- */
+.daysel {
+  width: 100%; margin-bottom: 12px;
+  padding: 11px 14px; border-radius: var(--radius);
+  border: 1px solid var(--accent); background: var(--card);
+  color: var(--accent); font: inherit; font-size: 15px; font-weight: 650;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  cursor: pointer;
+}
+.daysel::after { content: 'ganzer Monat'; font-weight: 400; font-size: 13px; }

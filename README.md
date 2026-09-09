@@ -25,6 +25,9 @@ kein Tracking.
 
 **Auswerten**
 - Stunden und Verdienst für Tag, Woche, Monat oder gesamt
+- Monatskalender: jeder Tag mit seinen Stunden, grüner Punkt heißt gemeldet,
+  oranger heißt offen. Einen Tag antippen zeigt nur dessen Einträge, ein leerer
+  Tag legt direkt einen neuen an
 - Stundenlohn hinterlegen, dann rechnet die App das Geld gleich mit
 
 **Daten**
