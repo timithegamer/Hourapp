@@ -19,7 +19,9 @@ kein Tracking.
 **Melden**
 - Fertige WhatsApp-Nachricht auf Knopfdruck
 - Vorlage frei bearbeitbar, Standard ist `{datum} | {beginn} - {ende} | {stunden} h`
-- Gemeldete Einträge bekommen ein Häkchen, offene werden gezählt
+- Gemeldete Einträge bekommen ein Häkchen
+- Knopf „3 offene Meldungen“ filtert die Übersicht auf alles Ungemeldete und
+  bietet an, sie als eine Nachricht zu senden oder einzeln durchzugehen
 
 **Auswerten**
 - Stunden und Verdienst für Tag, Woche, Monat oder gesamt
@@ -146,7 +148,16 @@ Alles liegt im lokalen Speicher der Web-App:
 - Löschst du das Icon vom Home-Bildschirm, sind die Daten weg
 - Ein neues iPhone übernimmt sie nicht automatisch
 
-Deshalb ab und zu unter **Mehr → Backup sichern** eine JSON-Datei ablegen.
+Deshalb ab und zu unter **Mehr → Backup sichern** eine JSON-Datei ablegen: auf
+**Teilen** tippen, dann **In Dateien sichern** und **iCloud Drive** wählen. Dann
+liegt die Datei außerhalb des iPhones und lässt sich über **Backup einspielen**
+von dort zurückholen.
+
+Die App merkt sich, wann du zuletzt gesichert hast, und erinnert dich nach einer
+einstellbaren Zahl von Tagen. Eine automatische Sicherung nach iCloud gibt es
+nicht: an den Speicher einer Web-App kommt weder iCloud Sync noch die
+Kurzbefehle-App heran, und ob ein vollständiges Geräte-Backup ihn mitnimmt, ist
+nirgends zugesichert.
 
 ## Lokal entwickeln
 

@@ -15,7 +15,9 @@ const DEFAULTS = {
     roundTarget: 'times',      // times = Anfang und Ende ziehen, duration = nur die Dauer
     wage: 0,                   // Stundenlohn in Euro, 0 = kein Geld anzeigen
     template: DEFAULT_TEMPLATE,
-    warnHours: 12              // Vergessen-Warnung, 0 = aus
+    warnHours: 12,             // Vergessen-Warnung, 0 = aus
+    backupDays: 14,            // Backup-Erinnerung nach x Tagen, 0 = aus
+    lastBackup: null           // ISO-Zeitpunkt des letzten gesicherten Backups
   }
 };
 
@@ -26,6 +28,9 @@ let editingId = null;
 let lastExport = null;
 let pendingImport = null;
 let warnDismissed = false;
+let backupDismissed = false;
+let onlyOpen = false;      // Filter: nur ungemeldete Eintraege
+let sendQueue = [];        // ids, die nacheinander gemeldet werden
 
 /* ============================ speicher ============================ */
 
@@ -200,6 +205,40 @@ async function sendWhatsApp(text) {
   }, 1500);
 }
 
+/** Ungemeldete Eintraege des angezeigten Zeitraums, aelteste zuerst. */
+function openEntries() {
+  const { from, to } = periodRange(period, periodOffset);
+  return entriesInRange(from, to).filter((e) => !e.sent);
+}
+
+function sendAllOpen() {
+  const list = openEntries();
+  if (!list.length) return;
+  const text = list.map((e) => buildMessage(e.start, e.end, e.note)).join('\n');
+  list.forEach((e) => { e.sent = true; });
+  onlyOpen = false;
+  save();
+  renderAll();
+  sendWhatsApp(text);
+}
+
+/** Meldet die offenen Eintraege einzeln, jeweils nach der Rueckkehr aus WhatsApp. */
+function startQueue() {
+  sendQueue = openEntries().map((e) => e.id);
+  if (!sendQueue.length) return;
+  nextInQueue();
+}
+
+function nextInQueue() {
+  while (sendQueue.length) {
+    const id = sendQueue.shift();
+    if (state.entries.some((e) => e.id === id)) { openSheet(id); return; }
+  }
+  onlyOpen = false;
+  renderAll();
+  toast('Alle offenen Meldungen durch');
+}
+
 /* ============================ zeitraeume ============================ */
 
 function periodRange(kind, offset) {
@@ -313,6 +352,38 @@ function paintQuickStats() {
   box.appendChild(statTile('Monat', sumRange(mFrom, mTo)));
 }
 
+/** Tage seit dem letzten Backup, oder null wenn noch nie gesichert. */
+function daysSinceBackup() {
+  const iso = state.settings.lastBackup;
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d)) return null;
+  return Math.floor((startOfDay(new Date()) - startOfDay(d)) / 86400000);
+}
+
+function markBackupDone() {
+  state.settings.lastBackup = new Date().toISOString();
+  backupDismissed = true;
+  save();
+  renderTimer();
+  renderSettings();
+}
+
+function paintBackupBanner() {
+  const limit = Number(state.settings.backupDays) || 0;
+  const days = daysSinceBackup();
+  const overdue = limit > 0 && state.entries.length > 0 &&
+                  (days === null || days >= limit);
+  const show = overdue && !backupDismissed;
+
+  $('#backup-banner').classList.toggle('hidden', !show);
+  if (show) {
+    $('#backup-text').textContent = days === null
+      ? 'Noch kein Backup gesichert. Die Daten liegen nur auf diesem iPhone.'
+      : `Letztes Backup vor ${days} Tagen. Zeit für ein neues.`;
+  }
+}
+
 function paintWarnBanner() {
   const h = Number(state.settings.warnHours) || 0;
   const show = !!state.running && h > 0 && !warnDismissed && runningSeconds() > h * 3600;
@@ -340,6 +411,7 @@ function renderTimer() {
 
   paintQuickStats();
   paintWarnBanner();
+  paintBackupBanner();
 
   const list = $('#today-list');
   list.textContent = '';
@@ -371,11 +443,20 @@ function renderHistory() {
   $('#period-hours').textContent = hm(min);
   $('#period-money').textContent = hasWage() ? money(min) : decHours(min) + ' Stunden';
 
-  const items = entriesInRange(from, to);
-  const open = items.filter((e) => !e.sent).length;
+  const all = entriesInRange(from, to);
+  const openItems = all.filter((e) => !e.sent);
+  if (!openItems.length) onlyOpen = false;
+  const items = onlyOpen ? openItems : all;
+
   const hint = $('#open-hint');
-  hint.classList.toggle('hidden', open === 0);
-  hint.textContent = open === 1 ? '1 Eintrag noch nicht gemeldet.' : `${open} Einträge noch nicht gemeldet.`;
+  hint.classList.toggle('hidden', openItems.length === 0);
+  hint.classList.toggle('on', onlyOpen);
+  hint.textContent = openItems.length === 1
+    ? '1 offene Meldung' : `${openItems.length} offene Meldungen`;
+
+  $('#open-bar').classList.toggle('hidden', !onlyOpen || !openItems.length);
+  $('#send-all').textContent = openItems.length === 1
+    ? 'Meldung senden' : `Alle ${openItems.length} als eine Nachricht`;
 
   // nach Tagen gruppieren, neueste zuerst
   const byDay = new Map();
@@ -384,7 +465,7 @@ function renderHistory() {
     if (!byDay.has(k)) byDay.set(k, []);
     byDay.get(k).push(e);
   });
-  if (runningInRange(from, to)) {
+  if (!onlyOpen && runningInRange(from, to)) {
     const k = dayKey(new Date(state.running.start));
     if (!byDay.has(k)) byDay.set(k, []);
   }
@@ -400,18 +481,26 @@ function renderHistory() {
     const head = el('div', 'dayhead');
     head.appendChild(el('span', null, fmtDate(day, { weekday: 'short', day: '2-digit', month: '2-digit' })));
     const right = el('span');
-    const dayMin = sumRange(startOfDay(day), addDays(startOfDay(day), 1));
+    const dayMin = onlyOpen
+      ? byDay.get(k).reduce((sum, e) => sum + entryMin(e), 0)
+      : sumRange(startOfDay(day), addDays(startOfDay(day), 1));
     right.appendChild(el('span', 'dsum', hm(dayMin)));
     if (hasWage()) right.appendChild(el('span', 'dbal', money(dayMin)));
     head.append(right);
     group.appendChild(head);
 
-    if (state.running && dayKey(new Date(state.running.start)) === k) group.appendChild(runningRow());
+    if (!onlyOpen && state.running && dayKey(new Date(state.running.start)) === k) {
+      group.appendChild(runningRow());
+    }
     byDay.get(k).forEach((e) => group.appendChild(entryRow(e)));
     list.appendChild(group);
   }
 
-  if (!keys.length) list.appendChild(el('p', 'empty', 'Keine Einträge in diesem Zeitraum.'));
+  if (!keys.length) {
+    list.appendChild(el('p', 'empty', onlyOpen
+      ? 'Alles gemeldet in diesem Zeitraum.'
+      : 'Keine Einträge in diesem Zeitraum.'));
+  }
 }
 
 function renderSettings() {
@@ -420,6 +509,16 @@ function renderSettings() {
   $('#set-roundmode').value = state.settings.roundMode;
   $('#set-roundtarget').value = state.settings.roundTarget;
   $('#set-warn').value = String(state.settings.warnHours);
+  $('#set-backup-days').value = String(state.settings.backupDays);
+
+  const days = daysSinceBackup();
+  const lb = $('#last-backup');
+  lb.textContent = days === null ? 'noch nie'
+    : days === 0 ? 'heute'
+    : days === 1 ? 'gestern'
+    : `vor ${days} Tagen`;
+  const limit = Number(state.settings.backupDays) || 0;
+  lb.className = limit && (days === null || days >= limit) ? 'neg' : '';
   ['#row-roundmode', '#row-roundtarget'].forEach((sel) => {
     $(sel).style.opacity = state.settings.roundTo ? 1 : .4;
   });
@@ -514,7 +613,9 @@ function openSheet(id, preset, justStopped) {
   editingId = id || null;
   const e = id ? state.entries.find((x) => x.id === id) : null;
 
-  $('#sheet-title').textContent = justStopped ? 'Zeit prüfen' : (e ? 'Eintrag' : 'Neuer Eintrag');
+  $('#sheet-title').textContent = justStopped ? 'Zeit prüfen'
+    : sendQueue.length ? `Noch ${sendQueue.length + 1} offen`
+    : (e ? 'Eintrag' : 'Neuer Eintrag');
   $('#sheet-intro').classList.toggle('hidden', !justStopped);
   $('#sheet-delete').classList.toggle('hidden', !e);
   $('#toggle-sent').textContent = e && e.sent ? 'Markierung „gemeldet“ entfernen' : 'Als gemeldet markieren';
@@ -539,9 +640,20 @@ function openSheet(id, preset, justStopped) {
   $('#sheet').classList.remove('hidden');
 }
 
-function closeSheet() {
+function hideSheet() {
   $('#sheet').classList.add('hidden');
   editingId = null;
+}
+
+/** Vom Nutzer abgebrochen: beendet auch eine laufende Melde-Reihe. */
+function cancelSheet() {
+  hideSheet();
+  if (sendQueue.length) {
+    sendQueue = [];
+    onlyOpen = false;
+    renderHistory();
+    toast('Reihe abgebrochen');
+  }
 }
 
 /** Liest das Formular. Ein Ende vor dem Beginn gilt als Folgetag (Nachtschicht). */
@@ -606,7 +718,7 @@ function commitSheet() {
 
 function saveSheet() {
   if (!commitSheet()) return;
-  closeSheet();
+  hideSheet();
   toast('Gesichert');
 }
 
@@ -614,7 +726,7 @@ function deleteEntry() {
   if (!editingId || !confirm('Diesen Eintrag löschen?')) return;
   state.entries = state.entries.filter((x) => x.id !== editingId);
   save();
-  closeSheet();
+  hideSheet();
   renderAll();
   toast('Gelöscht');
 }
@@ -927,10 +1039,13 @@ function applyImport(replace) {
 
 /* ============================ export / backup ============================ */
 
-function openExport(title, text, filename, mime) {
-  lastExport = { text, filename, mime };
+function openExport(title, text, filename, mime, isBackup) {
+  lastExport = { text, filename, mime, isBackup: !!isBackup };
   $('#ex-title').textContent = title;
   $('#ex-text').value = text;
+  $('#ex-hint').textContent = isBackup
+    ? 'Auf „Teilen“ tippen, dann „In Dateien sichern“ und iCloud Drive wählen. Dort holst du die Datei später über „Backup einspielen“ wieder.'
+    : 'Über „Teilen“ als Datei sichern, oder den Text kopieren.';
   $('#exsheet').classList.remove('hidden');
 
   $('#ex-share').onclick = async () => {
@@ -938,9 +1053,14 @@ function openExport(title, text, filename, mime) {
     try {
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({ files: [file], title });
+        if (isBackup) markBackupDone();
         return;
       }
-      if (navigator.share) { await navigator.share({ title, text }); return; }
+      if (navigator.share) {
+        await navigator.share({ title, text });
+        if (isBackup) markBackupDone();
+        return;
+      }
     } catch (err) {
       if (err && err.name === 'AbortError') return;
     }
@@ -950,6 +1070,7 @@ function openExport(title, text, filename, mime) {
     a.download = filename;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 4000);
+    if (isBackup) markBackupDone();
   };
 }
 
@@ -980,6 +1101,7 @@ function importJSON(text) {
     running: data.running && data.running.start ? data.running : null,
     settings: Object.assign(clone(DEFAULTS.settings), data.settings || {})
   };
+  backupDismissed = true;
   save();
   renderAll();
   toast('Backup eingespielt');
@@ -1042,6 +1164,23 @@ function bind() {
     if (state.running) { state.running.note = ev.target.value.trim(); save(); }
   });
 
+  $('#backup-now').addEventListener('click', () => {
+    showView('settings');
+    $('#export-json').click();
+  });
+  $('#backup-later').addEventListener('click', () => {
+    backupDismissed = true;
+    paintBackupBanner();
+  });
+
+  $('#set-backup-days').addEventListener('change', (ev) => {
+    state.settings.backupDays = Number(ev.target.value) || 0;
+    backupDismissed = false;
+    save();
+    renderTimer();
+    renderSettings();
+  });
+
   $('#forgot-stop').addEventListener('click', stopTimer);
   $('#forgot-ignore').addEventListener('click', () => {
     warnDismissed = true;
@@ -1055,8 +1194,13 @@ function bind() {
     b.addEventListener('click', () => {
       period = b.dataset.p;
       periodOffset = 0;
+      onlyOpen = false;
       renderHistory();
     }));
+  $('#open-hint').addEventListener('click', () => { onlyOpen = !onlyOpen; renderHistory(); });
+  $('#send-all').addEventListener('click', sendAllOpen);
+  $('#send-each').addEventListener('click', startQueue);
+
   $('#per-prev').addEventListener('click', () => { periodOffset--; renderHistory(); });
   $('#per-next').addEventListener('click', () => {
     if (periodOffset < 0) { periodOffset++; renderHistory(); }
@@ -1078,7 +1222,8 @@ function bind() {
 
   $('#sheet-save').addEventListener('click', saveSheet);
   $('#sheet-delete').addEventListener('click', deleteEntry);
-  document.querySelectorAll('[data-close]').forEach((n) => n.addEventListener('click', closeSheet));
+  document.querySelectorAll('[data-close]').forEach((n) =>
+    n.addEventListener('click', () => cancelSheet()));
   ['#f-date', '#f-start', '#f-end', '#f-note'].forEach((sel) => {
     $(sel).addEventListener('input', updatePreview);
     $(sel).addEventListener('change', updatePreview);
@@ -1091,7 +1236,7 @@ function bind() {
     save();
     renderAll();
     const text = buildMessage(entry.start, entry.end, entry.note);
-    closeSheet();
+    hideSheet();
     sendWhatsApp(text);
   });
 
@@ -1118,8 +1263,10 @@ function bind() {
       pendingImport = null;
       $('#impsheet').classList.add('hidden');
     }));
-  $('#ex-copy').addEventListener('click', () =>
-    copyText(lastExport ? lastExport.text : $('#ex-text').value));
+  $('#ex-copy').addEventListener('click', async () => {
+    await copyText(lastExport ? lastExport.text : $('#ex-text').value);
+    if (lastExport && lastExport.isBackup) markBackupDone();
+  });
 
   $('#set-wage').addEventListener('change', (ev) => {
     const v = Number(String(ev.target.value).replace(',', '.'));
@@ -1174,7 +1321,7 @@ function bind() {
   });
   $('#export-json').addEventListener('click', () =>
     openExport('Backup', JSON.stringify(state, null, 2),
-      `stunden-backup-${dayKey(new Date())}.json`, 'application/json'));
+      `stunden-backup-${dayKey(new Date())}.json`, 'application/json', true));
 
   $('#import-json').addEventListener('click', () => $('#import-file').click());
   $('#import-file').addEventListener('change', (ev) => {
@@ -1211,6 +1358,7 @@ function bind() {
     if (document.hidden || anySheetOpen()) return;
     state = load();
     renderAll();
+    if (sendQueue.length) nextInQueue();
   });
 }
 

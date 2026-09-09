@@ -29,6 +29,14 @@
       <p class="sub" id="today-date"></p>
     </header>
 
+    <div class="banner info hidden" id="backup-banner">
+      <span id="backup-text"></span>
+      <div class="banner-actions">
+        <button class="bannerbtn strong" id="backup-now">Jetzt sichern</button>
+        <button class="bannerbtn" id="backup-later">Später</button>
+      </div>
+    </div>
+
     <div class="banner hidden" id="forgot-banner">
       <span id="forgot-text"></span>
       <div class="banner-actions">
@@ -80,7 +88,12 @@
       <button class="navbtn" id="per-next" aria-label="Vor">›</button>
     </div>
 
-    <p class="hint openhint hidden" id="open-hint"></p>
+    <button class="openbtn hidden" id="open-hint"></button>
+
+    <div class="openbar hidden" id="open-bar">
+      <button class="wabtn" id="send-all">Alle als eine Nachricht</button>
+      <button class="rowbtn plain" id="send-each">Einzeln durchgehen</button>
+    </div>
 
     <div id="history-list" class="list"></div>
 
@@ -180,6 +193,25 @@
       <button class="rowbtn danger" id="wipe">Alle Daten löschen</button>
     </div>
 
+    <div class="card">
+      <div class="row">
+        <span>Letztes Backup</span>
+        <strong id="last-backup">–</strong>
+      </div>
+      <label class="row">
+        <span>Erinnern nach</span>
+        <select id="set-backup-days">
+          <option value="0">Nicht erinnern</option>
+          <option value="7">7 Tagen</option>
+          <option value="14">14 Tagen</option>
+          <option value="30">30 Tagen</option>
+        </select>
+      </label>
+      <div class="row col">
+        <span class="mini">Beim Sichern auf „Teilen“ tippen, dann „In Dateien sichern“ und iCloud Drive wählen. Dann liegt die Datei außerhalb dieses iPhones.</span>
+      </div>
+    </div>
+
     <h2 class="group-title">Kurzbefehle</h2>
     <div class="card">
       <div class="row col">
@@ -272,7 +304,7 @@
       <button class="linkbtn strong" id="ex-copy">Kopieren</button>
     </div>
     <div class="sheet-body">
-      <p class="hint">Über „Teilen“ als Datei sichern, oder den Text kopieren.</p>
+      <p class="hint" id="ex-hint">Über „Teilen“ als Datei sichern, oder den Text kopieren.</p>
       <button class="rowbtn plain" id="ex-share">Teilen …</button>
       <textarea id="ex-text" readonly spellcheck="false"></textarea>
     </div>

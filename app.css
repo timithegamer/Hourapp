@@ -391,7 +391,21 @@ h2 { font-size: 15px; margin: 0; font-weight: 600; }
 
 /* ---------- gemeldet-haken ---------- */
 .entry .range .sent { color: var(--good); font-weight: 700; margin-left: 6px; }
-.openhint { margin-bottom: 12px; }
+
+/* ---------- filter fuer offene meldungen ---------- */
+.openbtn {
+  width: 100%; margin-bottom: 12px;
+  padding: 12px 14px; border-radius: var(--radius);
+  border: 1px solid var(--line); background: var(--card);
+  color: var(--text); font: inherit; font-size: 15px;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  cursor: pointer;
+}
+.openbtn::after { content: 'nur diese zeigen'; color: var(--muted); font-size: 13px; }
+.openbtn.on { border-color: var(--accent); color: var(--accent); font-weight: 650; }
+.openbtn.on::after { content: 'Filter aus'; color: var(--accent); }
+.openbar { margin-bottom: 14px; }
+.openbar .wabtn { margin-top: 0; }
 
 /* ---------- vorlagen-editor ---------- */
 .row textarea {
@@ -433,3 +447,10 @@ h2 { font-size: 15px; margin: 0; font-weight: 600; }
   accent-color: var(--accent);
 }
 .sheet-body .card:has(.row.hidden) { display: none; }
+
+/* ---------- hinweisbanner in blau ---------- */
+.banner.info { background: #e5edff; color: #1e3a8a; border-color: #b9ccff; }
+.banner.info .bannerbtn.strong { color: #1e3a8a; }
+@media (prefers-color-scheme: dark) {
+  .banner.info { background: #1b2a4d; color: #bcd0ff; border-color: #2f4a86; }
+}
