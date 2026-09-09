@@ -426,3 +426,10 @@ h2 { font-size: 15px; margin: 0; font-weight: 600; }
 }
 .improw:last-child { border-bottom: 0; }
 .improw .dur { font-weight: 650; }
+
+/* ---------- ankreuzfeld in zeilen ---------- */
+.row input[type="checkbox"] {
+  width: 22px; height: 22px; min-width: 0;
+  accent-color: var(--accent);
+}
+.sheet-body .card:has(.row.hidden) { display: none; }

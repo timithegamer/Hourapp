@@ -675,6 +675,16 @@ function parseClock(s) {
   return h * 60 + mi;
 }
 
+/** "07.05.26 16:30" oder "2026-05-07T16:30" -> {date, min}. */
+function parseDateTime(s) {
+  const m = String(s || '').trim().match(/^(.+?)[\s,T]+(\d{1,2}[:.h]\d{2}(?::\d{2})?)$/i);
+  if (!m) return null;
+  const d = parseDate(m[1]);
+  const t = parseClock(m[2]);
+  if (!d || t == null) return null;
+  return { date: d, min: t };
+}
+
 /** Dauer-Spalte -> Minuten. Versteht "8:30", "8,5", "8.5", "8,5 h". */
 function parseDuration(s) {
   const raw = String(s || '').trim().replace(/\s*(std\.?|stunden|hrs?|h)$/i, '').trim();
@@ -688,14 +698,18 @@ function parseDuration(s) {
 
 const HEADS = {
   date:  ['datum', 'tag', 'date', 'day'],
-  start: ['beginn', 'anfang', 'von', 'start', 'kommen'],
-  end:   ['ende', 'bis', 'end', 'gehen', 'schluss'],
-  hours: ['stunden', 'dauer', 'arbeitszeit', 'hours', 'summe', 'std'],
-  note:  ['notiz', 'kommentar', 'bemerkung', 'note', 'tätigkeit', 'taetigkeit', 'beschreibung', 'projekt', 'kunde']
+  start: ['beginn', 'anfang', 'von', 'start', 'kommen', 'clockedin', 'clockin', 'einstempeln'],
+  end:   ['ende', 'bis', 'end', 'gehen', 'schluss', 'clockedout', 'clockout', 'ausstempeln'],
+  hours: ['stunden', 'dauer', 'duration', 'arbeitszeit', 'worked', 'hours', 'summe', 'std'],
+  rate:  ['stundenlohn', 'hourlyrate', 'lohn', 'satz', 'rate'],
+  note:  ['notiz', 'kommentar', 'comment', 'bemerkung', 'note', 'tätigkeit', 'taetigkeit',
+          'beschreibung', 'projekt', 'kunde', 'job', 'task']
 };
 
+const NO_COLS = { date: -1, start: -1, end: -1, hours: -1, rate: -1, note: -1 };
+
 function findHeader(cells) {
-  const cols = { date: -1, start: -1, end: -1, hours: -1, note: -1 };
+  const cols = { ...NO_COLS };
   let hits = 0;
   cells.forEach((c, i) => {
     const v = c.toLowerCase().replace(/[^a-zäöüß]/g, '');
@@ -710,20 +724,26 @@ function findHeader(cells) {
 
 /** Ohne Kopfzeile: Spalten am Inhalt der ersten brauchbaren Zeile erkennen. */
 function guessColumns(rows) {
-  const cols = { date: -1, start: -1, end: -1, hours: -1, note: -1 };
+  const cols = { ...NO_COLS };
   for (const cells of rows) {
-    const times = [];
+    const stamps = [], clocks = [];
+    let dateCol = -1;
     cells.forEach((c, i) => {
-      if (cols.date === -1 && parseDate(c)) { cols.date = i; return; }
-      if (parseClock(c) != null) times.push(i);
+      if (parseDateTime(c)) { stamps.push(i); return; }
+      if (dateCol === -1 && parseDate(c)) { dateCol = i; return; }
+      if (parseClock(c) != null) clocks.push(i);
     });
-    if (cols.date === -1) continue;
-    if (times.length >= 2) { cols.start = times[0]; cols.end = times[1]; }
-    else {
+
+    if (stamps.length >= 2) { cols.start = stamps[0]; cols.end = stamps[1]; }
+    else if (dateCol >= 0 && clocks.length >= 2) {
+      cols.date = dateCol; cols.start = clocks[0]; cols.end = clocks[1];
+    } else if (dateCol >= 0) {
+      cols.date = dateCol;
       cells.forEach((c, i) => {
-        if (i !== cols.date && cols.hours === -1 && parseDuration(c) != null) cols.hours = i;
+        if (i !== dateCol && cols.hours === -1 && parseDuration(c) != null) cols.hours = i;
       });
-    }
+    } else continue;
+
     cells.forEach((c, i) => {
       if (cols.note === -1 && i !== cols.date && i !== cols.start && i !== cols.end &&
           i !== cols.hours && c && !/^[\d\s.,:\/-]+$/.test(c)) cols.note = i;
@@ -733,12 +753,19 @@ function guessColumns(rows) {
   return cols;
 }
 
-function rowToEntry(cells, cols) {
-  const d = parseDate(cells[cols.date]);
-  if (!d) return null;
+const at = (day, min) => { const x = new Date(day); x.setHours(0, min, 0, 0); return x; };
 
-  let sMin = cols.start >= 0 ? parseClock(cells[cols.start]) : null;
-  let eMin = cols.end >= 0 ? parseClock(cells[cols.end]) : null;
+function rowToEntry(cells, cols) {
+  // Beginn und Ende koennen als "07.05.26 16:30" in einer Zelle stehen
+  const sStamp = cols.start >= 0 ? parseDateTime(cells[cols.start]) : null;
+  const eStamp = cols.end >= 0 ? parseDateTime(cells[cols.end]) : null;
+
+  const day = (cols.date >= 0 ? parseDate(cells[cols.date]) : null) ||
+              (sStamp && sStamp.date) || (eStamp && eStamp.date);
+  if (!day) return null;
+
+  let sMin = sStamp ? sStamp.min : (cols.start >= 0 ? parseClock(cells[cols.start]) : null);
+  let eMin = eStamp ? eStamp.min : (cols.end >= 0 ? parseClock(cells[cols.end]) : null);
   const dur = cols.hours >= 0 ? parseDuration(cells[cols.hours]) : null;
 
   if (sMin == null && eMin == null && dur == null) return null;
@@ -749,8 +776,8 @@ function rowToEntry(cells, cols) {
     eMin = sMin + dur;
   }
 
-  const start = new Date(d); start.setHours(0, sMin, 0, 0);
-  const end = new Date(d);   end.setHours(0, eMin, 0, 0);
+  const start = at(sStamp ? sStamp.date : day, sMin);
+  const end = at(eStamp ? eStamp.date : day, eMin);
   if (end <= start) end.setDate(end.getDate() + 1);
 
   const note = cols.note >= 0 ? String(cells[cols.note] || '').trim() : '';
@@ -758,25 +785,39 @@ function rowToEntry(cells, cols) {
 }
 
 function parseImport(text) {
-  const lines = text.replace(/^﻿/, '').split(/\r\n|\n|\r/).filter((l) => l.trim() !== '');
-  if (!lines.length) return { entries: [], skipped: 0, total: 0 };
+  const lines = text.replace(/^\uFEFF/, '').split(/\r\n|\n|\r/).filter((l) => l.trim() !== '');
+  if (!lines.length) return { entries: [], skipped: 0, total: 0, rate: null };
 
-  const delim = pickDelim(lines.slice(0, Math.min(6, lines.length)));
+  // Excel-Exporte stellen gern eine Zeile "sep=," voran
+  let forced = null;
+  const sepLine = lines[0].match(/^sep\s*=\s*(.)$/i);
+  if (sepLine) { forced = sepLine[1]; lines.shift(); }
+  if (!lines.length) return { entries: [], skipped: 0, total: 0, rate: null };
+
+  const delim = forced || pickDelim(lines.slice(0, Math.min(6, lines.length)));
   let rows = lines.map((l) => splitLine(l, delim));
 
   let cols = findHeader(rows[0]);
   if (cols) rows = rows.slice(1);
   else cols = guessColumns(rows);
 
-  if (cols.date === -1) return { entries: [], skipped: rows.length, total: rows.length, cols, delim };
-
   const entries = [];
+  const rates = [];
   let skipped = 0;
   for (const cells of rows) {
     const e = rowToEntry(cells, cols);
-    if (e) entries.push(e); else skipped++;
+    if (e) {
+      entries.push(e);
+      if (cols.rate >= 0) {
+        const r = Number(String(cells[cols.rate] || '').replace(',', '.'));
+        if (isFinite(r) && r > 0) rates.push(r);
+      }
+    } else skipped++;
   }
-  return { entries, skipped, total: rows.length, cols, delim };
+
+  // Stundenlohn nur anbieten, wenn die Datei sich einig ist
+  const rate = rates.length && rates.every((r) => r === rates[0]) ? rates[0] : null;
+  return { entries, skipped, total: rows.length, cols, delim, rate };
 }
 
 function openImportSheet(result) {
@@ -800,6 +841,16 @@ function openImportSheet(result) {
     box.appendChild(el('div', 'improw', `… und ${entries.length - 12} weitere`));
   }
 
+  const rateRow = $('#imp-rate-row');
+  if (result.rate) {
+    rateRow.classList.remove('hidden');
+    $('#imp-rate-label').textContent =
+      `Stundenlohn ${result.rate.toLocaleString('de-DE', { minimumFractionDigits: 2 })} € übernehmen`;
+    $('#imp-rate').checked = !hasWage();
+  } else {
+    rateRow.classList.add('hidden');
+  }
+
   $('#imp-skipped').textContent = skipped
     ? `${skipped} Zeile(n) übersprungen, weil kein Datum oder keine Zeiten erkennbar waren.`
     : '';
@@ -808,18 +859,29 @@ function openImportSheet(result) {
   $('#impsheet').classList.remove('hidden');
 }
 
+function dedupeKey(e) {
+  const r = roundedRange(e.start, e.end);
+  return r.start.getTime() + '|' + r.end.getTime();
+}
+
 function applyImport(replace) {
   if (!pendingImport || !pendingImport.entries.length) return;
   const incoming = pendingImport.entries;
+
+  if (pendingImport.rate && $('#imp-rate').checked) {
+    state.settings.wage = pendingImport.rate;
+  }
 
   if (replace) {
     if (!confirm(`Alle ${state.entries.length} vorhandenen Einträge löschen und durch ${incoming.length} ersetzen?`)) return;
     state.entries = incoming;
   } else {
-    const known = new Set(state.entries.map((e) => e.start + '|' + e.end));
+    // Ueber die gerundeten Zeiten vergleichen: der CSV-Export enthaelt nur diese,
+    // ein Rueckimport wuerde sonst alles doppelt anlegen.
+    const known = new Set(state.entries.map(dedupeKey));
     let added = 0, dupes = 0;
     for (const e of incoming) {
-      const k = e.start + '|' + e.end;
+      const k = dedupeKey(e);
       if (known.has(k)) { dupes++; continue; }
       known.add(k);
       state.entries.push(e);

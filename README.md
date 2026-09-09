@@ -86,18 +86,31 @@ Zwischenablage, falls WhatsApp nicht aufgeht.
 
 Unter **Mehr → Alte Einträge aus CSV importieren**. Der Import erkennt selbst:
 
-- Trennzeichen: Semikolon, Tabulator, senkrechter Strich, Komma
+- Trennzeichen: Semikolon, Tabulator, senkrechter Strich, Komma, sowie eine
+  vorangestellte `sep=,`-Zeile, wie Excel sie schreibt
 - Kopfzeile oder keine Kopfzeile
-- Spaltennamen wie Datum, Von, Bis, Beginn, Ende, Stunden, Dauer, Notiz
+- Spaltennamen auf deutsch und englisch: Datum, Von, Bis, Beginn, Ende, Stunden,
+  Dauer, Notiz, Clocked In, Clocked Out, Duration, Comment, Job, Hourly Rate
 - Datumsformate `09.09.2026`, `9.9.26`, `2026-09-09`, `09.09.`
+- Datum und Uhrzeit in derselben Zelle, etwa `07.05.26 16:30` oder `2026-05-07T16:30`
 - Zeiten `07:00`, Dauern `8:30`, `8,5`, `8.5 h`
 - Anführungszeichen um Felder, die das Trennzeichen enthalten
 
+Enthält die Datei eine Spalte mit dem Stundenlohn und sind alle Zeilen sich
+einig, bietet der Import an, ihn zu übernehmen.
+
 Stehen nur Datum und Stundenzahl in der Datei, setzt der Import 08:00 als Beginn.
 Vor dem Übernehmen siehst du eine Vorschau und wie viele Zeilen übersprungen
-wurden. Beim Hinzufügen werden Einträge mit identischen Zeiten übersprungen, du
-kannst dieselbe Datei also gefahrlos zweimal einlesen. Importierte Einträge
-gelten als bereits gemeldet.
+wurden. Beim Hinzufügen werden Einträge übersprungen, deren gerundete Zeiten
+schon vorhanden sind, du kannst dieselbe Datei also gefahrlos zweimal einlesen
+und auch den eigenen CSV-Export zurückspielen. Importierte Einträge gelten als
+bereits gemeldet.
+
+Achtung beim Vergleich mit anderen Apps: Diese hier rundet Beginn und Ende,
+andere runden stattdessen die Dauer. Bei `17:28 – 19:51` ergibt das hier
+`17:30 – 19:45`, also 2,25 h, während eine Dauer-Rundung aus 2:23 glatte 2,5 h
+macht. Meistens kommt dasselbe heraus, in Einzelfällen eine Viertelstunde
+Unterschied.
 
 ## Kurzbefehle, NFC, Siri
 
