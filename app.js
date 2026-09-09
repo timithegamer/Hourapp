@@ -3,23 +3,28 @@
 
 const KEY = 'hourapp.v1';
 const DAYS = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+const DEFAULT_TEMPLATE = '{datum} | {beginn} - {ende} | {stunden} h';
 const clone = (o) => JSON.parse(JSON.stringify(o));
 
 const DEFAULTS = {
-  entries: [],   // {id, start:ISO, end:ISO, note:string}
+  entries: [],   // {id, start:ISO, end:ISO, note:string, sent:bool}
   running: null, // {start:ISO, note:string}
   settings: {
-    targetHours: 8,
-    workdays: [1, 2, 3, 4, 5],
     roundTo: 15,               // Minuten-Raster, 0 = aus
-    roundMode: 'nearest'       // nearest | up | down
+    roundMode: 'nearest',      // nearest | up | down
+    wage: 0,                   // Stundenlohn in Euro, 0 = kein Geld anzeigen
+    template: DEFAULT_TEMPLATE,
+    warnHours: 12              // Vergessen-Warnung, 0 = aus
   }
 };
 
 let state = load();
-let weekOffset = 0;
+let period = 'week';           // day | week | month | all
+let periodOffset = 0;
 let editingId = null;
 let lastExport = null;
+let pendingImport = null;
+let warnDismissed = false;
 
 /* ============================ speicher ============================ */
 
@@ -30,7 +35,7 @@ function load() {
     const d = JSON.parse(raw);
     return {
       entries: Array.isArray(d.entries)
-        ? d.entries.filter((e) => e && e.start && e.end)
+        ? d.entries.filter((e) => e && e.start && e.end).map((e) => ({ sent: false, ...e }))
         : [],
       running: d.running && d.running.start ? d.running : null,
       settings: Object.assign(clone(DEFAULTS.settings), d.settings || {})
@@ -54,6 +59,7 @@ function save() {
 
 const $ = (sel) => document.querySelector(sel);
 const pad = (n) => String(n).padStart(2, '0');
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
 function startOfDay(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
 function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
@@ -68,6 +74,7 @@ function startOfWeek(d) {
 
 const clock = (d) => pad(d.getHours()) + ':' + pad(d.getMinutes());
 const shortDate = (d) => pad(d.getDate()) + '.' + pad(d.getMonth() + 1) + '.';
+const fullDate = (d) => shortDate(d) + d.getFullYear();
 
 /** Minuten -> "7:30" */
 function hm(min) {
@@ -76,26 +83,28 @@ function hm(min) {
   return (neg ? '-' : '') + Math.floor(m / 60) + ':' + pad(m % 60);
 }
 
-/** Minuten -> "+7:30" / "-1:15" / "±0:00" */
-function hmSigned(min) {
-  const r = Math.round(min);
-  if (r === 0) return '±0:00';
-  return (r > 0 ? '+' : '') + hm(r);
-}
-
 /** Sekunden -> "1:07:42" */
 function hms(sec) {
   const s = Math.max(0, Math.floor(sec));
   return Math.floor(s / 3600) + ':' + pad(Math.floor(s / 60) % 60) + ':' + pad(s % 60);
 }
 
-/** Minuten -> "8,5" (Dezimalstunden, ohne ueberfluessige Nullen) */
+/** Minuten -> "8,5" (Dezimalstunden ohne ueberfluessige Nullen) */
 function decHours(min) {
   return (min / 60).toFixed(2).replace(/0+$/, '').replace(/\.$/, '').replace('.', ',');
 }
 
 function fmtDate(d, opts) {
   return d.toLocaleDateString('de-DE', opts || { weekday: 'long', day: '2-digit', month: 'long' });
+}
+
+/* ============================ geld ============================ */
+
+const hasWage = () => (Number(state.settings.wage) || 0) > 0;
+
+function money(min) {
+  const val = (min / 60) * (Number(state.settings.wage) || 0);
+  return val.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
 }
 
 /* ============================ rundung ============================ */
@@ -135,27 +144,31 @@ function entryMin(e) {
   return Math.max(0, (r.end - r.start) / 60000);
 }
 
-function isRounded(e) {
-  const r = roundedRange(e.start, e.end);
-  return r.start.getTime() !== new Date(e.start).getTime() ||
-         r.end.getTime() !== new Date(e.end).getTime();
-}
-
 /* ============================ nachricht ============================ */
 
-/** "09.09. | 07:00 - 16:00 | 8,5 h" */
-function buildMessage(startISO, endISO) {
+const PLACEHOLDERS = {
+  '{datum}':      (c) => shortDate(c.start),
+  '{datum_lang}': (c) => fullDate(c.start),
+  '{wochentag}':  (c) => DAYS[c.start.getDay()],
+  '{beginn}':     (c) => clock(c.start),
+  '{ende}':       (c) => clock(c.end),
+  '{stunden}':    (c) => decHours(c.min),
+  '{stunden_hm}': (c) => hm(c.min),
+  '{geld}':       (c) => money(c.min),
+  '{notiz}':      (c) => c.note || ''
+};
+
+function buildMessage(startISO, endISO, note) {
   const r = roundedRange(startISO, endISO);
-  const min = Math.max(0, (r.end - r.start) / 60000);
-  return `${shortDate(r.start)} | ${clock(r.start)} - ${clock(r.end)} | ${decHours(min)} h`;
+  const ctx = { start: r.start, end: r.end, min: Math.max(0, (r.end - r.start) / 60000), note: note || '' };
+  const tpl = state.settings.template || DEFAULT_TEMPLATE;
+  return tpl.replace(/\{[a-z_]+\}/g, (m) => (PLACEHOLDERS[m] ? PLACEHOLDERS[m](ctx) : m));
 }
 
 async function sendWhatsApp(text) {
   let copied = false;
-  try {
-    await navigator.clipboard.writeText(text);
-    copied = true;
-  } catch (err) { /* Zwischenablage ist nur die Absicherung */ }
+  try { await navigator.clipboard.writeText(text); copied = true; }
+  catch (err) { /* Zwischenablage ist nur die Absicherung */ }
 
   window.location.href = 'whatsapp://send?text=' + encodeURIComponent(text);
 
@@ -166,11 +179,34 @@ async function sendWhatsApp(text) {
   }, 1500);
 }
 
-/* ============================ berechnung ============================ */
+/* ============================ zeitraeume ============================ */
 
-function entriesOfDay(key) {
+function periodRange(kind, offset) {
+  const now = new Date();
+  if (kind === 'day') {
+    const from = addDays(startOfDay(now), offset);
+    return { from, to: addDays(from, 1), label: fmtDate(from) };
+  }
+  if (kind === 'month') {
+    const from = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+    const to = new Date(from.getFullYear(), from.getMonth() + 1, 1);
+    return { from, to, label: from.toLocaleDateString('de-DE', { month: 'long', year: 'numeric' }) };
+  }
+  if (kind === 'all') {
+    return { from: new Date(-8640000000000000), to: new Date(8640000000000000), label: 'Alle Einträge' };
+  }
+  const from = addDays(startOfWeek(now), offset * 7);
+  const to = addDays(from, 7);
+  return {
+    from, to,
+    label: fmtDate(from, { day: '2-digit', month: '2-digit' }) + ' – ' +
+           fmtDate(addDays(to, -1), { day: '2-digit', month: '2-digit', year: 'numeric' })
+  };
+}
+
+function entriesInRange(from, to) {
   return state.entries
-    .filter((e) => dayKey(new Date(e.start)) === key)
+    .filter((e) => { const s = new Date(e.start); return s >= from && s < to; })
     .sort((a, b) => new Date(a.start) - new Date(b.start));
 }
 
@@ -178,32 +214,20 @@ function runningSeconds() {
   return state.running ? Math.max(0, (Date.now() - new Date(state.running.start)) / 1000) : 0;
 }
 
-function dayMinutes(key, withRunning) {
-  let sum = entriesOfDay(key).reduce((s, e) => s + entryMin(e), 0);
-  if (withRunning && state.running && dayKey(new Date(state.running.start)) === key) {
-    sum += runningSeconds() / 60;
-  }
+function runningInRange(from, to) {
+  if (!state.running) return false;
+  const s = new Date(state.running.start);
+  return s >= from && s < to;
+}
+
+/** Summe in Minuten, laufender Timer eingerechnet. */
+function sumRange(from, to) {
+  let sum = entriesInRange(from, to).reduce((s, e) => s + entryMin(e), 0);
+  if (runningInRange(from, to)) sum += runningSeconds() / 60;
   return sum;
 }
 
-const isWorkday = (d) => state.settings.workdays.includes(d.getDay());
-
-/** Soll-Minuten: nur an Arbeitstagen, und nur bis einschliesslich heute. */
-function targetMinutes(d) {
-  if (!isWorkday(d)) return 0;
-  if (startOfDay(d) > startOfDay(new Date())) return 0;
-  return (Number(state.settings.targetHours) || 0) * 60;
-}
-
-function weekStats(monday) {
-  let ist = 0, soll = 0;
-  for (let i = 0; i < 7; i++) {
-    const d = addDays(monday, i);
-    ist += dayMinutes(dayKey(d), true);
-    soll += targetMinutes(d);
-  }
-  return { ist, soll, saldo: ist - soll };
-}
+const entriesOfDay = (d) => entriesInRange(startOfDay(d), addDays(startOfDay(d), 1));
 
 /* ============================ darstellung ============================ */
 
@@ -220,10 +244,16 @@ function entryRow(e) {
 
   const r = roundedRange(e.start, e.end);
   const box = el('div', 'times');
-  box.appendChild(el('div', 'range', `${clock(r.start)} – ${clock(r.end)}`));
+  const range = el('div', 'range', `${clock(r.start)} – ${clock(r.end)}`);
+  if (e.sent) range.appendChild(el('span', 'sent', '✓'));
+  box.appendChild(range);
   if (e.note) box.appendChild(el('div', 'note', e.note));
 
-  btn.append(box, el('div', 'dur', hm(entryMin(e))));
+  const right = el('div');
+  right.appendChild(el('div', 'dur', hm(entryMin(e))));
+  if (hasWage()) right.appendChild(el('div', 'stat-money', money(entryMin(e))));
+
+  btn.append(box, right);
   btn.addEventListener('click', () => openSheet(e.id));
   return btn;
 }
@@ -243,14 +273,33 @@ function card(children) {
   return box;
 }
 
-function paintStats() {
+function statTile(label, min) {
+  const t = el('div', 'stat');
+  t.appendChild(el('span', 'stat-val', hm(min)));
+  t.appendChild(el('span', 'stat-key', label));
+  if (hasWage()) t.appendChild(el('span', 'stat-money', money(min)));
+  return t;
+}
+
+function paintQuickStats() {
   const now = new Date();
-  const week = weekStats(startOfWeek(now));
-  $('#stat-today').textContent = hm(dayMinutes(dayKey(now), true));
-  $('#stat-week').textContent = hm(week.ist);
-  const bal = $('#stat-balance');
-  bal.textContent = hmSigned(week.saldo);
-  bal.className = 'stat-val ' + (week.saldo >= 0 ? 'pos' : 'neg');
+  const box = $('#quick-stats');
+  box.textContent = '';
+  box.appendChild(statTile('Heute', sumRange(startOfDay(now), addDays(startOfDay(now), 1))));
+  box.appendChild(statTile('Woche', sumRange(startOfWeek(now), addDays(startOfWeek(now), 7))));
+  const mFrom = new Date(now.getFullYear(), now.getMonth(), 1);
+  const mTo = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  box.appendChild(statTile('Monat', sumRange(mFrom, mTo)));
+}
+
+function paintWarnBanner() {
+  const h = Number(state.settings.warnHours) || 0;
+  const show = !!state.running && h > 0 && !warnDismissed && runningSeconds() > h * 3600;
+  $('#forgot-banner').classList.toggle('hidden', !show);
+  if (show) {
+    $('#forgot-text').textContent =
+      `Der Timer läuft seit ${hm(runningSeconds() / 60)} Stunden. Vergessen zu stoppen?`;
+  }
 }
 
 function renderTimer() {
@@ -262,104 +311,117 @@ function renderTimer() {
   $('#clock-label').textContent = running
     ? 'Läuft seit ' + clock(new Date(state.running.start))
     : 'Nicht gestartet';
+  $('#clock-money').textContent = running && hasWage() ? money(runningSeconds() / 60) : '';
 
   const btn = $('#toggle-btn');
   btn.textContent = running ? 'Stopp' : 'Start';
   btn.classList.toggle('stop', running);
 
-  paintStats();
+  paintQuickStats();
+  paintWarnBanner();
 
-  const key = dayKey(now);
   const list = $('#today-list');
   list.textContent = '';
-  if (running && dayKey(new Date(state.running.start)) === key) list.appendChild(card([runningRow()]));
-  const items = entriesOfDay(key);
+  if (running && dayKey(new Date(state.running.start)) === dayKey(now)) {
+    list.appendChild(card([runningRow()]));
+  }
+  const items = entriesOfDay(now);
   if (items.length) list.appendChild(card(items.map(entryRow)));
   else if (!running) list.appendChild(el('p', 'empty', 'Heute noch nichts erfasst.'));
+
+  $('#add-like-last').classList.toggle('hidden', !lastEntry());
+}
+
+function lastEntry() {
+  if (!state.entries.length) return null;
+  return state.entries.reduce((a, b) => (new Date(a.start) > new Date(b.start) ? a : b));
 }
 
 function renderHistory() {
-  const monday = addDays(startOfWeek(new Date()), weekOffset * 7);
-  const sunday = addDays(monday, 6);
+  const { from, to, label } = periodRange(period, periodOffset);
+  $('#period-label').textContent = label + (periodOffset === 0 && period !== 'all' ? ' · aktuell' : '');
 
-  $('#week-range').textContent =
-    fmtDate(monday, { day: '2-digit', month: '2-digit' }) + ' – ' +
-    fmtDate(sunday, { day: '2-digit', month: '2-digit', year: 'numeric' }) +
-    (weekOffset === 0 ? ' · diese Woche' : '');
+  document.querySelectorAll('#period-seg button').forEach((b) =>
+    b.classList.toggle('on', b.dataset.p === period));
+  $('#period-nav').classList.toggle('hidden', period === 'all');
+  $('#per-next').style.opacity = periodOffset >= 0 ? .35 : 1;
 
-  const st = weekStats(monday);
-  $('#week-total').textContent = hm(st.ist);
-  const wb = $('#week-balance');
-  wb.textContent = 'Saldo ' + hmSigned(st.saldo);
-  wb.className = st.saldo >= 0 ? 'pos' : 'neg';
-  $('#week-next').style.opacity = weekOffset >= 0 ? .35 : 1;
+  const min = sumRange(from, to);
+  $('#period-hours').textContent = hm(min);
+  $('#period-money').textContent = hasWage() ? money(min) : decHours(min) + ' Stunden';
+
+  const items = entriesInRange(from, to);
+  const open = items.filter((e) => !e.sent).length;
+  const hint = $('#open-hint');
+  hint.classList.toggle('hidden', open === 0);
+  hint.textContent = open === 1 ? '1 Eintrag noch nicht gemeldet.' : `${open} Einträge noch nicht gemeldet.`;
+
+  // nach Tagen gruppieren, neueste zuerst
+  const byDay = new Map();
+  items.forEach((e) => {
+    const k = dayKey(new Date(e.start));
+    if (!byDay.has(k)) byDay.set(k, []);
+    byDay.get(k).push(e);
+  });
+  if (runningInRange(from, to)) {
+    const k = dayKey(new Date(state.running.start));
+    if (!byDay.has(k)) byDay.set(k, []);
+  }
 
   const list = $('#history-list');
   list.textContent = '';
-  let any = false;
+  const keys = [...byDay.keys()].sort().reverse();
 
-  for (let i = 6; i >= 0; i--) {
-    const d = addDays(monday, i);
-    const key = dayKey(d);
-    const items = entriesOfDay(key);
-    const live = !!state.running && dayKey(new Date(state.running.start)) === key;
-    if (!items.length && !live) continue;
-    any = true;
-
+  for (const k of keys) {
+    const day = new Date(k + 'T00:00:00');
     const group = el('div', 'daygroup');
-    const head = el('div', 'dayhead');
-    head.appendChild(el('span', null, fmtDate(d, { weekday: 'short', day: '2-digit', month: '2-digit' })));
 
+    const head = el('div', 'dayhead');
+    head.appendChild(el('span', null, fmtDate(day, { weekday: 'short', day: '2-digit', month: '2-digit' })));
     const right = el('span');
-    right.appendChild(el('span', 'dsum', hm(dayMinutes(key, true))));
-    const soll = targetMinutes(d);
-    if (soll > 0) {
-      const diff = dayMinutes(key, true) - soll;
-      right.appendChild(el('span', 'dbal ' + (diff >= 0 ? 'pos' : 'neg'), hmSigned(diff)));
-    }
-    head.appendChild(right);
+    const dayMin = sumRange(startOfDay(day), addDays(startOfDay(day), 1));
+    right.appendChild(el('span', 'dsum', hm(dayMin)));
+    if (hasWage()) right.appendChild(el('span', 'dbal', money(dayMin)));
+    head.append(right);
     group.appendChild(head);
 
-    if (live) group.appendChild(runningRow());
-    items.forEach((e) => group.appendChild(entryRow(e)));
+    if (state.running && dayKey(new Date(state.running.start)) === k) group.appendChild(runningRow());
+    byDay.get(k).forEach((e) => group.appendChild(entryRow(e)));
     list.appendChild(group);
   }
 
-  if (!any) list.appendChild(el('p', 'empty', 'Keine Einträge in dieser Woche.'));
+  if (!keys.length) list.appendChild(el('p', 'empty', 'Keine Einträge in diesem Zeitraum.'));
 }
 
 function renderSettings() {
-  $('#set-target').value = state.settings.targetHours;
+  $('#set-wage').value = state.settings.wage || '';
   $('#set-round').value = String(state.settings.roundTo);
   $('#set-roundmode').value = state.settings.roundMode;
+  $('#set-warn').value = String(state.settings.warnHours);
   $('#row-roundmode').style.opacity = state.settings.roundTo ? 1 : .4;
   $('#set-roundmode').disabled = !state.settings.roundTo;
 
-  // Beispiel mit einer krummen Schicht, damit der Modus sichtbar wird
+  // Beispiel mit krummer Schicht, damit der Modus sichtbar wird
   const base = startOfDay(new Date());
   const s = new Date(base.getTime() + (7 * 60 + 3) * 60000);
   const e = new Date(base.getTime() + (16 * 60 + 7) * 60000);
   const r = roundedRange(s.toISOString(), e.toISOString());
-  const min = (r.end - r.start) / 60000;
   $('#round-example').textContent = state.settings.roundTo
-    ? `07:03 – 16:07  wird zu  ${clock(r.start)} – ${clock(r.end)}  (${decHours(min)} h)`
+    ? `07:03 – 16:07  wird zu  ${clock(r.start)} – ${clock(r.end)}  (${decHours((r.end - r.start) / 60000)} h)`
     : '07:03 – 16:07 bleibt wie erfasst (9,07 h)';
 
-  const box = $('#set-days');
-  box.textContent = '';
-  [1, 2, 3, 4, 5, 6, 0].forEach((idx) => {
-    const b = el('button', 'day' + (state.settings.workdays.includes(idx) ? ' on' : ''), DAYS[idx]);
+  if ($('#set-template').value !== state.settings.template) {
+    $('#set-template').value = state.settings.template;
+  }
+  $('#tpl-preview').textContent = buildMessage(s.toISOString(), e.toISOString(), 'Beispielnotiz');
+
+  const chips = $('#tpl-chips');
+  chips.textContent = '';
+  Object.keys(PLACEHOLDERS).forEach((ph) => {
+    const b = el('button', 'chip', ph);
     b.type = 'button';
-    b.addEventListener('click', () => {
-      const set = new Set(state.settings.workdays);
-      set.has(idx) ? set.delete(idx) : set.add(idx);
-      state.settings.workdays = [...set].sort();
-      save();
-      renderSettings();
-      renderTimer();
-      renderHistory();
-    });
-    box.appendChild(b);
+    b.addEventListener('click', () => insertPlaceholder(ph));
+    chips.appendChild(b);
   });
 
   $('#storage-hint').textContent =
@@ -375,39 +437,45 @@ function renderAll() {
 
 /* ============================ timer ============================ */
 
-const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-
-function toggleTimer() {
-  if (state.running) {
-    const start = new Date(state.running.start);
-    const end = new Date();
-    const note = state.running.note || '';
-    state.running = null;
-    $('#running-note').value = '';
-
-    if (end - start < 30000 && !confirm('Weniger als 30 Sekunden. Eintrag trotzdem anlegen?')) {
-      save();
-      renderAll();
-      return;
-    }
-
-    const entry = { id: uid(), start: start.toISOString(), end: end.toISOString(), note };
-    state.entries.push(entry);
-    save();
-    renderAll();
-    openSheet(entry.id, null, true);
-  } else {
-    state.running = { start: new Date().toISOString(), note: $('#running-note').value.trim() };
-    save();
-    renderAll();
-    toast('Timer läuft');
-  }
+function startTimer() {
+  if (state.running) { toast('Timer läuft schon'); return; }
+  state.running = { start: new Date().toISOString(), note: $('#running-note').value.trim() };
+  warnDismissed = false;
+  save();
+  renderAll();
+  toast('Timer läuft');
 }
+
+function stopTimer() {
+  if (!state.running) { toast('Kein Timer aktiv'); return; }
+  const start = new Date(state.running.start);
+  const end = new Date();
+  const note = state.running.note || '';
+  state.running = null;
+  warnDismissed = false;
+  $('#running-note').value = '';
+
+  if (end - start < 30000 && !confirm('Weniger als 30 Sekunden. Eintrag trotzdem anlegen?')) {
+    save();
+    renderAll();
+    return;
+  }
+
+  const entry = { id: uid(), start: start.toISOString(), end: end.toISOString(), note, sent: false };
+  state.entries.push(entry);
+  save();
+  renderAll();
+  openSheet(entry.id, null, true);
+}
+
+const toggleTimer = () => (state.running ? stopTimer() : startTimer());
 
 function tick() {
   if (!state.running) return;
   $('#clock').textContent = hms(runningSeconds());
-  paintStats();
+  if (hasWage()) $('#clock-money').textContent = money(runningSeconds() / 60);
+  paintQuickStats();
+  paintWarnBanner();
   document.querySelectorAll('.entry.live .dur').forEach((n) => {
     n.textContent = hm(runningSeconds() / 60);
   });
@@ -415,13 +483,15 @@ function tick() {
 
 /* ============================ eintrags-sheet ============================ */
 
-function openSheet(id, presetDate, justStopped) {
+function openSheet(id, preset, justStopped) {
   editingId = id || null;
   const e = id ? state.entries.find((x) => x.id === id) : null;
 
   $('#sheet-title').textContent = justStopped ? 'Zeit prüfen' : (e ? 'Eintrag' : 'Neuer Eintrag');
   $('#sheet-intro').classList.toggle('hidden', !justStopped);
   $('#sheet-delete').classList.toggle('hidden', !e);
+  $('#toggle-sent').textContent = e && e.sent ? 'Markierung „gemeldet“ entfernen' : 'Als gemeldet markieren';
+  $('#toggle-sent').classList.toggle('hidden', !e);
 
   if (e) {
     const s = new Date(e.start), en = new Date(e.end);
@@ -430,11 +500,12 @@ function openSheet(id, presetDate, justStopped) {
     $('#f-end').value = clock(en);
     $('#f-note').value = e.note || '';
   } else {
-    const d = presetDate || new Date();
+    const p = preset || {};
+    const d = p.date || new Date();
     $('#f-date').value = dayKey(d);
-    $('#f-start').value = '07:00';
-    $('#f-end').value = '16:00';
-    $('#f-note').value = '';
+    $('#f-start').value = p.start || '07:00';
+    $('#f-end').value = p.end || '16:00';
+    $('#f-note').value = p.note || '';
   }
 
   updatePreview();
@@ -466,13 +537,17 @@ function updatePreview() {
   if (!v) {
     $('#msg-text').textContent = '–';
     $('#raw-note').textContent = '';
+    $('#f-money').textContent = '–';
     $('#send-wa').disabled = true;
     return;
   }
   $('#send-wa').disabled = false;
-  $('#msg-text').textContent = buildMessage(v.start.toISOString(), v.end.toISOString());
+  $('#msg-text').textContent = buildMessage(v.start.toISOString(), v.end.toISOString(), v.note);
 
   const r = roundedRange(v.start.toISOString(), v.end.toISOString());
+  const min = Math.max(0, (r.end - r.start) / 60000);
+  $('#f-money').textContent = hasWage() ? money(min) : hm(min);
+
   const changed = r.start.getTime() !== v.start.getTime() || r.end.getTime() !== v.end.getTime();
   $('#raw-note').textContent = changed
     ? `gerundet · tatsächlich ${clock(v.start)} – ${clock(v.end)} (${hm((v.end - v.start) / 60000)} h)`
@@ -492,7 +567,7 @@ function commitSheet() {
     entry.end = v.end.toISOString();
     entry.note = v.note;
   } else {
-    entry = { id: uid(), start: v.start.toISOString(), end: v.end.toISOString(), note: v.note };
+    entry = { id: uid(), start: v.start.toISOString(), end: v.end.toISOString(), note: v.note, sent: false };
     state.entries.push(entry);
     editingId = entry.id;
   }
@@ -516,10 +591,10 @@ function deleteEntry() {
   toast('Gelöscht');
 }
 
-/* ============================ export / import ============================ */
+/* ============================ csv ============================ */
 
 function buildCSV() {
-  const rows = [['Datum', 'Beginn', 'Ende', 'Stunden', 'Stunden (h:mm)', 'Notiz']];
+  const rows = [['Datum', 'Beginn', 'Ende', 'Stunden', 'Stunden (h:mm)', 'Verdienst', 'Gemeldet', 'Notiz']];
   const sorted = [...state.entries].sort((a, b) => new Date(a.start) - new Date(b.start));
   let total = 0;
 
@@ -528,19 +603,239 @@ function buildCSV() {
     const min = entryMin(e);
     total += min;
     rows.push([
-      r.start.toLocaleDateString('de-DE'),
+      fullDate(r.start),
       clock(r.start),
       clock(r.end),
       decHours(min),
       hm(min),
+      hasWage() ? money(min) : '',
+      e.sent ? 'ja' : 'nein',
       (e.note || '').replace(/[;\r\n]/g, ' ')
     ]);
   }
 
   rows.push([]);
-  rows.push(['Summe', '', '', decHours(total), hm(total), '']);
+  rows.push(['Summe', '', '', decHours(total), hm(total), hasWage() ? money(total) : '', '', '']);
   return rows.map((r) => r.join(';')).join('\r\n');
 }
+
+/** Zerlegt eine CSV-Zeile und respektiert Anfuehrungszeichen. */
+function splitLine(line, d) {
+  const out = [];
+  let cur = '', quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quoted) {
+      if (c === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++; } else quoted = false;
+      } else cur += c;
+    } else if (c === '"') quoted = true;
+    else if (c === d) { out.push(cur); cur = ''; }
+    else cur += c;
+  }
+  out.push(cur);
+  return out.map((s) => s.trim());
+}
+
+/** Raet das Trennzeichen: gleich viele Spalten in allen Zeilen gewinnt. */
+function pickDelim(sample) {
+  let best = ';', bestScore = -1;
+  for (const d of [';', '\t', '|', ',']) {
+    const counts = sample.map((l) => splitLine(l, d).length).sort((a, b) => a - b);
+    const median = counts[Math.floor(counts.length / 2)];
+    const steady = counts.filter((c) => c === median).length / counts.length;
+    // Ein Trenner ueberzeugt, wenn er in den meisten Zeilen dieselbe Spaltenzahl liefert.
+    const score = median > 1 ? median * 10 * steady : 0;
+    if (score > bestScore) { bestScore = score; best = d; }
+  }
+  return best;
+}
+
+function parseDate(s) {
+  s = String(s || '').trim();
+  let m = s.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2,4})$/);
+  if (m) {
+    let y = Number(m[3]);
+    if (y < 100) y += y < 70 ? 2000 : 1900;
+    return new Date(y, Number(m[2]) - 1, Number(m[1]));
+  }
+  m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  m = s.match(/^(\d{1,2})[.\/-](\d{1,2})\.?$/);
+  if (m) return new Date(new Date().getFullYear(), Number(m[2]) - 1, Number(m[1]));
+  return null;
+}
+
+/** Uhrzeit einer Von/Bis-Spalte -> Minuten seit Mitternacht. */
+function parseClock(s) {
+  const m = String(s || '').trim().match(/^(\d{1,2})[:.h](\d{2})(?::\d{2})?$/i);
+  if (!m) return null;
+  const h = Number(m[1]), mi = Number(m[2]);
+  if (h > 23 || mi > 59) return null;
+  return h * 60 + mi;
+}
+
+/** Dauer-Spalte -> Minuten. Versteht "8:30", "8,5", "8.5", "8,5 h". */
+function parseDuration(s) {
+  const raw = String(s || '').trim().replace(/\s*(std\.?|stunden|hrs?|h)$/i, '').trim();
+  if (!raw) return null;
+  const m = raw.match(/^(\d{1,2}):(\d{2})$/);
+  if (m) return Number(m[1]) * 60 + Number(m[2]);
+  const n = Number(raw.replace(',', '.'));
+  if (!isFinite(n) || n < 0 || n > 24) return null;
+  return Math.round(n * 60);
+}
+
+const HEADS = {
+  date:  ['datum', 'tag', 'date', 'day'],
+  start: ['beginn', 'anfang', 'von', 'start', 'kommen'],
+  end:   ['ende', 'bis', 'end', 'gehen', 'schluss'],
+  hours: ['stunden', 'dauer', 'arbeitszeit', 'hours', 'summe', 'std'],
+  note:  ['notiz', 'kommentar', 'bemerkung', 'note', 'tätigkeit', 'taetigkeit', 'beschreibung', 'projekt', 'kunde']
+};
+
+function findHeader(cells) {
+  const cols = { date: -1, start: -1, end: -1, hours: -1, note: -1 };
+  let hits = 0;
+  cells.forEach((c, i) => {
+    const v = c.toLowerCase().replace(/[^a-zäöüß]/g, '');
+    for (const key of Object.keys(HEADS)) {
+      if (cols[key] === -1 && HEADS[key].some((h) => v === h || v.startsWith(h))) {
+        cols[key] = i; hits++; return;
+      }
+    }
+  });
+  return hits >= 2 ? cols : null;
+}
+
+/** Ohne Kopfzeile: Spalten am Inhalt der ersten brauchbaren Zeile erkennen. */
+function guessColumns(rows) {
+  const cols = { date: -1, start: -1, end: -1, hours: -1, note: -1 };
+  for (const cells of rows) {
+    const times = [];
+    cells.forEach((c, i) => {
+      if (cols.date === -1 && parseDate(c)) { cols.date = i; return; }
+      if (parseClock(c) != null) times.push(i);
+    });
+    if (cols.date === -1) continue;
+    if (times.length >= 2) { cols.start = times[0]; cols.end = times[1]; }
+    else {
+      cells.forEach((c, i) => {
+        if (i !== cols.date && cols.hours === -1 && parseDuration(c) != null) cols.hours = i;
+      });
+    }
+    cells.forEach((c, i) => {
+      if (cols.note === -1 && i !== cols.date && i !== cols.start && i !== cols.end &&
+          i !== cols.hours && c && !/^[\d\s.,:\/-]+$/.test(c)) cols.note = i;
+    });
+    return cols;
+  }
+  return cols;
+}
+
+function rowToEntry(cells, cols) {
+  const d = parseDate(cells[cols.date]);
+  if (!d) return null;
+
+  let sMin = cols.start >= 0 ? parseClock(cells[cols.start]) : null;
+  let eMin = cols.end >= 0 ? parseClock(cells[cols.end]) : null;
+  const dur = cols.hours >= 0 ? parseDuration(cells[cols.hours]) : null;
+
+  if (sMin == null && eMin == null && dur == null) return null;
+  if (sMin == null && eMin != null && dur != null) sMin = eMin - dur;
+  if (sMin == null) sMin = 8 * 60;                 // Standard-Beginn, wenn nur Stunden bekannt sind
+  if (eMin == null) {
+    if (dur == null) return null;
+    eMin = sMin + dur;
+  }
+
+  const start = new Date(d); start.setHours(0, sMin, 0, 0);
+  const end = new Date(d);   end.setHours(0, eMin, 0, 0);
+  if (end <= start) end.setDate(end.getDate() + 1);
+
+  const note = cols.note >= 0 ? String(cells[cols.note] || '').trim() : '';
+  return { id: uid(), start: start.toISOString(), end: end.toISOString(), note, sent: true };
+}
+
+function parseImport(text) {
+  const lines = text.replace(/^﻿/, '').split(/\r\n|\n|\r/).filter((l) => l.trim() !== '');
+  if (!lines.length) return { entries: [], skipped: 0, total: 0 };
+
+  const delim = pickDelim(lines.slice(0, Math.min(6, lines.length)));
+  let rows = lines.map((l) => splitLine(l, delim));
+
+  let cols = findHeader(rows[0]);
+  if (cols) rows = rows.slice(1);
+  else cols = guessColumns(rows);
+
+  if (cols.date === -1) return { entries: [], skipped: rows.length, total: rows.length, cols, delim };
+
+  const entries = [];
+  let skipped = 0;
+  for (const cells of rows) {
+    const e = rowToEntry(cells, cols);
+    if (e) entries.push(e); else skipped++;
+  }
+  return { entries, skipped, total: rows.length, cols, delim };
+}
+
+function openImportSheet(result) {
+  pendingImport = result;
+  const { entries, skipped, total } = result;
+
+  $('#imp-summary').textContent = entries.length
+    ? `${entries.length} von ${total} Zeilen erkannt. Vorschau der ersten Einträge:`
+    : `Keine verwertbaren Zeilen gefunden (${total} geprüft). Schick mir ein paar Beispielzeilen, dann passe ich den Import an.`;
+
+  const box = $('#imp-preview');
+  box.textContent = '';
+  entries.slice(0, 12).forEach((e) => {
+    const row = el('div', 'improw');
+    const s = new Date(e.start), en = new Date(e.end);
+    row.appendChild(el('span', null, `${fullDate(s)}  ${clock(s)} – ${clock(en)}`));
+    row.appendChild(el('span', 'dur', hm(entryMin(e))));
+    box.appendChild(row);
+  });
+  if (entries.length > 12) {
+    box.appendChild(el('div', 'improw', `… und ${entries.length - 12} weitere`));
+  }
+
+  $('#imp-skipped').textContent = skipped
+    ? `${skipped} Zeile(n) übersprungen, weil kein Datum oder keine Zeiten erkennbar waren.`
+    : '';
+  $('#imp-add').disabled = !entries.length;
+  $('#imp-replace').classList.toggle('hidden', !entries.length);
+  $('#impsheet').classList.remove('hidden');
+}
+
+function applyImport(replace) {
+  if (!pendingImport || !pendingImport.entries.length) return;
+  const incoming = pendingImport.entries;
+
+  if (replace) {
+    if (!confirm(`Alle ${state.entries.length} vorhandenen Einträge löschen und durch ${incoming.length} ersetzen?`)) return;
+    state.entries = incoming;
+  } else {
+    const known = new Set(state.entries.map((e) => e.start + '|' + e.end));
+    let added = 0, dupes = 0;
+    for (const e of incoming) {
+      const k = e.start + '|' + e.end;
+      if (known.has(k)) { dupes++; continue; }
+      known.add(k);
+      state.entries.push(e);
+      added++;
+    }
+    toast(dupes ? `${added} hinzugefügt, ${dupes} Dubletten übersprungen` : `${added} Einträge hinzugefügt`);
+  }
+
+  save();
+  pendingImport = null;
+  $('#impsheet').classList.add('hidden');
+  renderAll();
+  if (replace) toast(`${state.entries.length} Einträge importiert`);
+}
+
+/* ============================ export / backup ============================ */
 
 function openExport(title, text, filename, mime) {
   lastExport = { text, filename, mime };
@@ -591,7 +886,7 @@ function importJSON(text) {
   if (!confirm(`Backup mit ${data.entries.length} Einträgen einspielen? Die aktuellen Daten werden ersetzt.`)) return;
 
   state = {
-    entries: data.entries.filter((e) => e && e.start && e.end),
+    entries: data.entries.filter((e) => e && e.start && e.end).map((e) => ({ sent: false, ...e })),
     running: data.running && data.running.start ? data.running : null,
     settings: Object.assign(clone(DEFAULTS.settings), data.settings || {})
   };
@@ -599,6 +894,34 @@ function importJSON(text) {
   renderAll();
   toast('Backup eingespielt');
 }
+
+/* ============================ vorlage ============================ */
+
+function insertPlaceholder(ph) {
+  const t = $('#set-template');
+  const a = t.selectionStart != null ? t.selectionStart : t.value.length;
+  const b = t.selectionEnd != null ? t.selectionEnd : t.value.length;
+  t.value = t.value.slice(0, a) + ph + t.value.slice(b);
+  const pos = a + ph.length;
+  t.setSelectionRange(pos, pos);
+  state.settings.template = t.value;
+  save();
+  renderSettings();
+  t.focus();
+}
+
+/* ============================ url-aktionen ============================ */
+
+function handleUrlAction() {
+  const a = new URLSearchParams(location.search).get('a');
+  if (!a) return;
+  history.replaceState(null, '', location.pathname);
+  if (a === 'start') startTimer();
+  else if (a === 'stop') stopTimer();
+  else if (a === 'toggle') toggleTimer();
+}
+
+const actionUrl = (a) => location.origin + location.pathname + '?a=' + a;
 
 /* ============================ ui ============================ */
 
@@ -608,19 +931,19 @@ function toast(msg) {
   t.textContent = msg;
   t.classList.remove('hidden');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.add('hidden'), 2200);
+  toastTimer = setTimeout(() => t.classList.add('hidden'), 2400);
 }
 
 function showView(name) {
-  ['timer', 'history', 'settings'].forEach((v) => {
-    $('#view-' + v).classList.toggle('hidden', v !== name);
-  });
-  document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
+  ['timer', 'history', 'settings'].forEach((v) =>
+    $('#view-' + v).classList.toggle('hidden', v !== name));
+  document.querySelectorAll('.tab').forEach((b) =>
+    b.classList.toggle('active', b.dataset.view === name));
   window.scrollTo(0, 0);
 }
 
-function sheetOpen() {
-  return !$('#sheet').classList.contains('hidden') || !$('#exsheet').classList.contains('hidden');
+function anySheetOpen() {
+  return ['#sheet', '#exsheet', '#impsheet'].some((s) => !$(s).classList.contains('hidden'));
 }
 
 function bind() {
@@ -629,20 +952,44 @@ function bind() {
     if (state.running) { state.running.note = ev.target.value.trim(); save(); }
   });
 
+  $('#forgot-stop').addEventListener('click', stopTimer);
+  $('#forgot-ignore').addEventListener('click', () => {
+    warnDismissed = true;
+    paintWarnBanner();
+  });
+
   document.querySelectorAll('.tab').forEach((b) =>
     b.addEventListener('click', () => showView(b.dataset.view)));
 
-  $('#week-prev').addEventListener('click', () => { weekOffset--; renderHistory(); });
-  $('#week-next').addEventListener('click', () => { if (weekOffset < 0) { weekOffset++; renderHistory(); } });
+  document.querySelectorAll('#period-seg button').forEach((b) =>
+    b.addEventListener('click', () => {
+      period = b.dataset.p;
+      periodOffset = 0;
+      renderHistory();
+    }));
+  $('#per-prev').addEventListener('click', () => { periodOffset--; renderHistory(); });
+  $('#per-next').addEventListener('click', () => {
+    if (periodOffset < 0) { periodOffset++; renderHistory(); }
+  });
 
-  $('#add-today').addEventListener('click', () => openSheet(null, new Date()));
+  $('#add-today').addEventListener('click', () => openSheet(null, { date: new Date() }));
   $('#add-any').addEventListener('click', () =>
-    openSheet(null, addDays(startOfWeek(new Date()), weekOffset * 7)));
+    openSheet(null, { date: periodRange(period, periodOffset).from }));
+  $('#add-like-last').addEventListener('click', () => {
+    const e = lastEntry();
+    if (!e) { toast('Noch kein Eintrag vorhanden'); return; }
+    openSheet(null, {
+      date: new Date(),
+      start: clock(new Date(e.start)),
+      end: clock(new Date(e.end)),
+      note: e.note || ''
+    });
+  });
 
   $('#sheet-save').addEventListener('click', saveSheet);
   $('#sheet-delete').addEventListener('click', deleteEntry);
   document.querySelectorAll('[data-close]').forEach((n) => n.addEventListener('click', closeSheet));
-  ['#f-date', '#f-start', '#f-end'].forEach((sel) => {
+  ['#f-date', '#f-start', '#f-end', '#f-note'].forEach((sel) => {
     $(sel).addEventListener('input', updatePreview);
     $(sel).addEventListener('change', updatePreview);
   });
@@ -650,7 +997,10 @@ function bind() {
   $('#send-wa').addEventListener('click', () => {
     const entry = commitSheet();
     if (!entry) return;
-    const text = buildMessage(entry.start, entry.end);
+    entry.sent = true;
+    save();
+    renderAll();
+    const text = buildMessage(entry.start, entry.end, entry.note);
     closeSheet();
     sendWhatsApp(text);
   });
@@ -658,21 +1008,35 @@ function bind() {
   $('#copy-msg').addEventListener('click', () => {
     const v = readSheet();
     if (!v) { toast('Bitte Datum und Zeiten ausfüllen'); return; }
-    copyText(buildMessage(v.start.toISOString(), v.end.toISOString()), 'Nachricht kopiert');
+    copyText(buildMessage(v.start.toISOString(), v.end.toISOString(), v.note), 'Nachricht kopiert');
+  });
+
+  $('#toggle-sent').addEventListener('click', () => {
+    const e = state.entries.find((x) => x.id === editingId);
+    if (!e) return;
+    e.sent = !e.sent;
+    save();
+    renderAll();
+    $('#toggle-sent').textContent = e.sent ? 'Markierung „gemeldet“ entfernen' : 'Als gemeldet markieren';
+    toast(e.sent ? 'Als gemeldet markiert' : 'Markierung entfernt');
   });
 
   document.querySelectorAll('[data-exclose]').forEach((n) =>
     n.addEventListener('click', () => $('#exsheet').classList.add('hidden')));
+  document.querySelectorAll('[data-impclose]').forEach((n) =>
+    n.addEventListener('click', () => {
+      pendingImport = null;
+      $('#impsheet').classList.add('hidden');
+    }));
   $('#ex-copy').addEventListener('click', () =>
     copyText(lastExport ? lastExport.text : $('#ex-text').value));
 
-  $('#set-target').addEventListener('change', (ev) => {
-    const v = Number(ev.target.value);
-    state.settings.targetHours = isNaN(v) ? 8 : Math.min(24, Math.max(0, v));
-    ev.target.value = state.settings.targetHours;
+  $('#set-wage').addEventListener('change', (ev) => {
+    const v = Number(String(ev.target.value).replace(',', '.'));
+    state.settings.wage = isFinite(v) && v > 0 ? v : 0;
+    ev.target.value = state.settings.wage || '';
     save();
-    renderTimer();
-    renderHistory();
+    renderAll();
   });
   $('#set-round').addEventListener('change', (ev) => {
     state.settings.roundTo = Number(ev.target.value) || 0;
@@ -684,6 +1048,30 @@ function bind() {
     save();
     renderAll();
   });
+  $('#set-warn').addEventListener('change', (ev) => {
+    state.settings.warnHours = Number(ev.target.value) || 0;
+    warnDismissed = false;
+    save();
+    renderTimer();
+  });
+  $('#set-template').addEventListener('input', (ev) => {
+    state.settings.template = ev.target.value;
+    save();
+    $('#tpl-preview').textContent = buildMessage(
+      new Date(startOfDay(new Date()).getTime() + (7 * 60 + 3) * 60000).toISOString(),
+      new Date(startOfDay(new Date()).getTime() + (16 * 60 + 7) * 60000).toISOString(),
+      'Beispielnotiz'
+    );
+  });
+  $('#tpl-reset').addEventListener('click', () => {
+    state.settings.template = DEFAULT_TEMPLATE;
+    save();
+    renderSettings();
+    toast('Vorlage zurückgesetzt');
+  });
+
+  $('#copy-start-url').addEventListener('click', () => copyText(actionUrl('start'), 'Start-Adresse kopiert'));
+  $('#copy-stop-url').addEventListener('click', () => copyText(actionUrl('stop'), 'Stopp-Adresse kopiert'));
 
   $('#export-csv').addEventListener('click', () => {
     if (!state.entries.length) { toast('Noch nichts zu exportieren'); return; }
@@ -692,6 +1080,7 @@ function bind() {
   $('#export-json').addEventListener('click', () =>
     openExport('Backup', JSON.stringify(state, null, 2),
       `stunden-backup-${dayKey(new Date())}.json`, 'application/json'));
+
   $('#import-json').addEventListener('click', () => $('#import-file').click());
   $('#import-file').addEventListener('change', (ev) => {
     const f = ev.target.files && ev.target.files[0];
@@ -701,6 +1090,18 @@ function bind() {
     r.readAsText(f);
     ev.target.value = '';
   });
+
+  $('#import-csv').addEventListener('click', () => $('#csv-file').click());
+  $('#csv-file').addEventListener('change', (ev) => {
+    const f = ev.target.files && ev.target.files[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => openImportSheet(parseImport(String(r.result)));
+    r.readAsText(f, 'utf-8');
+    ev.target.value = '';
+  });
+  $('#imp-add').addEventListener('click', () => applyImport(false));
+  $('#imp-replace').addEventListener('click', () => applyImport(true));
 
   $('#wipe').addEventListener('click', () => {
     if (!confirm('Wirklich alle Einträge und Einstellungen löschen?')) return;
@@ -712,7 +1113,7 @@ function bind() {
   });
 
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden || sheetOpen()) return;
+    if (document.hidden || anySheetOpen()) return;
     state = load();
     renderAll();
   });
@@ -723,6 +1124,7 @@ function bind() {
 bind();
 if (state.running && state.running.note) $('#running-note').value = state.running.note;
 renderAll();
+handleUrlAction();
 setInterval(tick, 1000);
 
 if ('serviceWorker' in navigator) {

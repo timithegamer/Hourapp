@@ -29,50 +29,58 @@
       <p class="sub" id="today-date"></p>
     </header>
 
+    <div class="banner hidden" id="forgot-banner">
+      <span id="forgot-text"></span>
+      <div class="banner-actions">
+        <button class="bannerbtn strong" id="forgot-stop">Jetzt stoppen</button>
+        <button class="bannerbtn" id="forgot-ignore">Läuft schon richtig</button>
+      </div>
+    </div>
+
     <div class="clockcard">
       <div class="clock" id="clock">0:00:00</div>
       <div class="clock-label" id="clock-label">Nicht gestartet</div>
+      <div class="clock-money" id="clock-money"></div>
       <button class="bigbtn start" id="toggle-btn">Start</button>
       <input class="notefield" id="running-note" type="text" placeholder="Notiz (optional)" autocomplete="off" enterkeyhint="done">
     </div>
 
-    <div class="stats">
-      <div class="stat">
-        <span class="stat-val" id="stat-today">0:00</span>
-        <span class="stat-key">Heute</span>
-      </div>
-      <div class="stat">
-        <span class="stat-val" id="stat-week">0:00</span>
-        <span class="stat-key">Diese Woche</span>
-      </div>
-      <div class="stat">
-        <span class="stat-val" id="stat-balance">±0:00</span>
-        <span class="stat-key">Saldo Woche</span>
-      </div>
-    </div>
+    <div class="stats" id="quick-stats"></div>
 
     <div class="section-head">
       <h2>Einträge heute</h2>
-      <button class="linkbtn" id="add-today">+ Eintrag</button>
+      <div class="head-actions">
+        <button class="linkbtn" id="add-like-last">Wie letztes Mal</button>
+        <button class="linkbtn" id="add-today">+ Eintrag</button>
+      </div>
     </div>
     <div id="today-list" class="list"></div>
   </section>
 
-  <!-- ================= VERLAUF ================= -->
+  <!-- ================= ÜBERSICHT ================= -->
   <section class="view hidden" id="view-history">
     <header class="head">
-      <h1>Verlauf</h1>
-      <p class="sub" id="week-range"></p>
+      <h1>Übersicht</h1>
+      <p class="sub" id="period-label"></p>
     </header>
 
-    <div class="weeknav">
-      <button class="navbtn" id="week-prev" aria-label="Vorherige Woche">‹</button>
-      <div class="weeksum">
-        <strong id="week-total">0:00</strong>
-        <span id="week-balance">±0:00</span>
-      </div>
-      <button class="navbtn" id="week-next" aria-label="Nächste Woche">›</button>
+    <div class="seg" id="period-seg">
+      <button data-p="day">Tag</button>
+      <button data-p="week" class="on">Woche</button>
+      <button data-p="month">Monat</button>
+      <button data-p="all">Gesamt</button>
     </div>
+
+    <div class="periodnav" id="period-nav">
+      <button class="navbtn" id="per-prev" aria-label="Zurück">‹</button>
+      <div class="periodsum">
+        <strong id="period-hours">0:00</strong>
+        <span id="period-money"></span>
+      </div>
+      <button class="navbtn" id="per-next" aria-label="Vor">›</button>
+    </div>
+
+    <p class="hint openhint hidden" id="open-hint"></p>
 
     <div id="history-list" class="list"></div>
 
@@ -87,6 +95,17 @@
       <h1>Einstellungen</h1>
       <p class="sub">Alles bleibt lokal auf diesem iPhone</p>
     </header>
+
+    <h2 class="group-title">Verdienst</h2>
+    <div class="card">
+      <label class="row">
+        <span>Stundenlohn</span>
+        <span class="suffixed"><input type="number" id="set-wage" inputmode="decimal" step="0.5" min="0"><em>€</em></span>
+      </label>
+      <div class="row col">
+        <span class="mini">Ohne Stundenlohn zeigt die App nur Stunden, kein Geld.</span>
+      </div>
+    </div>
 
     <h2 class="group-title">Rundung</h2>
     <div class="card">
@@ -114,24 +133,56 @@
       </div>
     </div>
 
-    <h2 class="group-title">Soll-Zeit</h2>
+    <h2 class="group-title">Nachricht</h2>
+    <div class="card">
+      <div class="row col">
+        <span class="mini">Vorlage</span>
+        <textarea id="set-template" rows="2" spellcheck="false" autocapitalize="off"></textarea>
+      </div>
+      <div class="row col">
+        <span class="mini">Vorschau</span>
+        <code class="example" id="tpl-preview"></code>
+      </div>
+      <div class="row col">
+        <span class="mini">Platzhalter antippen zum Einfügen</span>
+        <div class="chips" id="tpl-chips"></div>
+      </div>
+      <button class="rowbtn" id="tpl-reset">Vorlage zurücksetzen</button>
+    </div>
+
+    <h2 class="group-title">Timer</h2>
     <div class="card">
       <label class="row">
-        <span>Stunden pro Arbeitstag</span>
-        <input type="number" id="set-target" inputmode="decimal" step="0.25" min="0" max="24">
+        <span>Warnen, wenn Timer länger läuft als</span>
+        <select id="set-warn">
+          <option value="0">Nie warnen</option>
+          <option value="8">8 Stunden</option>
+          <option value="10">10 Stunden</option>
+          <option value="12">12 Stunden</option>
+          <option value="16">16 Stunden</option>
+        </select>
       </label>
-      <div class="row col">
-        <span class="mini">Arbeitstage</span>
-        <div class="days" id="set-days"></div>
-      </div>
     </div>
 
     <h2 class="group-title">Daten</h2>
     <div class="card">
+      <button class="rowbtn" id="import-csv">Alte Einträge aus CSV importieren</button>
       <button class="rowbtn" id="export-csv">Export als CSV</button>
       <button class="rowbtn" id="export-json">Backup sichern (JSON)</button>
       <button class="rowbtn" id="import-json">Backup einspielen</button>
       <button class="rowbtn danger" id="wipe">Alle Daten löschen</button>
+    </div>
+
+    <h2 class="group-title">Kurzbefehle</h2>
+    <div class="card">
+      <div class="row col">
+        <span class="mini">Die App reagiert auf diese Adressen, damit du sie über die Kurzbefehle-App, einen NFC-Sticker oder Siri auslösen kannst.</span>
+        <code class="example">…/?a=start</code>
+        <code class="example">…/?a=stop</code>
+        <code class="example">…/?a=toggle</code>
+      </div>
+      <button class="rowbtn" id="copy-start-url">Start-Adresse kopieren</button>
+      <button class="rowbtn" id="copy-stop-url">Stopp-Adresse kopieren</button>
     </div>
 
     <p class="hint" id="storage-hint"></p>
@@ -140,7 +191,7 @@
   <!-- ================= TABS ================= -->
   <nav class="tabs">
     <button class="tab active" data-view="timer"><span class="ico">⏱</span><span>Timer</span></button>
-    <button class="tab" data-view="history"><span class="ico">▤</span><span>Verlauf</span></button>
+    <button class="tab" data-view="history"><span class="ico">▤</span><span>Übersicht</span></button>
     <button class="tab" data-view="settings"><span class="ico">⚙</span><span>Mehr</span></button>
   </nav>
 </div>
@@ -162,9 +213,10 @@
         <label class="row"><span>Beginn</span><input type="time" id="f-start"></label>
         <label class="row"><span>Ende</span><input type="time" id="f-end"></label>
         <label class="row"><span>Notiz</span><input type="text" id="f-note" placeholder="optional" autocomplete="off"></label>
+        <div class="row"><span>Verdienst</span><strong id="f-money">–</strong></div>
       </div>
 
-      <div class="preview" id="msg-preview">
+      <div class="preview">
         <span class="mini">Nachricht</span>
         <code id="msg-text">–</code>
         <span class="mini rounded-note" id="raw-note"></span>
@@ -172,7 +224,27 @@
 
       <button class="wabtn" id="send-wa">Per WhatsApp senden</button>
       <button class="rowbtn plain" id="copy-msg">Nur Text kopieren</button>
+      <button class="rowbtn plain" id="toggle-sent">Als gemeldet markieren</button>
       <button class="rowbtn danger plain hidden" id="sheet-delete">Eintrag löschen</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= IMPORT-SHEET ================= -->
+<div class="sheet-wrap hidden" id="impsheet">
+  <div class="sheet-bg" data-impclose></div>
+  <div class="sheet">
+    <div class="sheet-head">
+      <button class="linkbtn" data-impclose>Abbrechen</button>
+      <strong>CSV-Import</strong>
+      <span class="linkbtn placeholder"></span>
+    </div>
+    <div class="sheet-body">
+      <p class="hint" id="imp-summary"></p>
+      <div class="card" id="imp-preview"></div>
+      <p class="hint" id="imp-skipped"></p>
+      <button class="wabtn" id="imp-add">Einträge hinzufügen</button>
+      <button class="rowbtn danger plain" id="imp-replace">Alles ersetzen</button>
     </div>
   </div>
 </div>
@@ -196,6 +268,7 @@
 
 <div class="toast hidden" id="toast"></div>
 <input type="file" id="import-file" accept="application/json,.json" hidden>
+<input type="file" id="csv-file" accept=".csv,.txt,text/csv,text/plain" hidden>
 
 <script src="app.js"></script>
 </body>

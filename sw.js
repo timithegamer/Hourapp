@@ -1,5 +1,5 @@
 /* Service Worker: App-Shell offline verfuegbar halten. */
-const VERSION = 'stunden-v1';
+const VERSION = 'stunden-v2';
 const ASSETS = [
   './',
   './index.html',
