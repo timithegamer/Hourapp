@@ -45,14 +45,30 @@ nicht. Am einfachsten über GitHub Pages:
 
 ## Rundung
 
-Die Rundung zieht Beginn und Ende aufs eingestellte Raster, die Stunden ergeben
-sich daraus. So rechnet die Nachricht für den Empfänger sauber auf.
+Drei Einstellungen: das Raster, worauf gerundet wird, und in welche Richtung.
 
-- **Kaufmännisch**: beide Zeiten auf den nächstliegenden Rasterpunkt
-- **Aufrunden**: Beginn nach unten, Ende nach oben, also zu deinen Gunsten
-- **Abrunden**: Beginn nach oben, Ende nach unten
+**Runden auf: Anfang und Ende** (Standard) zieht beide Zeiten aufs Raster, die
+Stunden ergeben sich daraus. Die Nachricht rechnet dadurch immer sauber auf.
 
-Die Einstellungen zeigen an einem Beispiel, was der gewählte Modus konkret macht.
+**Runden auf: nur die Dauer** lässt die Zeiten stehen und rundet die Stundenzahl.
+So machen es viele Zeiterfassungs-Apps. Zeiten und Stundenzahl in der Nachricht
+passen dann nicht immer exakt zusammen.
+
+**Modus:**
+
+- **Kaufmännisch**: auf den nächstliegenden Rasterpunkt
+- **Aufrunden**: bei Zeiten wandert der Beginn nach unten und das Ende nach oben,
+  also zu deinen Gunsten; bei Dauer-Rundung wird die Stundenzahl aufgerundet
+- **Abrunden**: jeweils umgekehrt
+
+Beispiel `17:28 – 19:51` bei 15-Minuten-Raster, kaufmännisch:
+
+| Runden auf | Ergebnis |
+| --- | --- |
+| Anfang und Ende | `17:30 – 19:45`, 2,25 h |
+| Nur die Dauer | `17:28 – 19:51`, 2,5 h |
+
+Die Einstellungen zeigen an einem Beispiel, was die gewählte Kombination macht.
 Im Eintrag steht unter der Nachricht zusätzlich die tatsächlich erfasste Zeit,
 damit du siehst, was die Rundung verändert hat.
 
@@ -106,11 +122,8 @@ schon vorhanden sind, du kannst dieselbe Datei also gefahrlos zweimal einlesen
 und auch den eigenen CSV-Export zurückspielen. Importierte Einträge gelten als
 bereits gemeldet.
 
-Achtung beim Vergleich mit anderen Apps: Diese hier rundet Beginn und Ende,
-andere runden stattdessen die Dauer. Bei `17:28 – 19:51` ergibt das hier
-`17:30 – 19:45`, also 2,25 h, während eine Dauer-Rundung aus 2:23 glatte 2,5 h
-macht. Meistens kommt dasselbe heraus, in Einzelfällen eine Viertelstunde
-Unterschied.
+Kommen die Daten aus einer App, die die Dauer rundet, stell unter **Rundung**
+das Ziel auf *nur die Dauer*, dann stimmen alte und neue Zahlen überein.
 
 ## Kurzbefehle, NFC, Siri
 

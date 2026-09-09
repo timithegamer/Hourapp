@@ -12,6 +12,7 @@ const DEFAULTS = {
   settings: {
     roundTo: 15,               // Minuten-Raster, 0 = aus
     roundMode: 'nearest',      // nearest | up | down
+    roundTarget: 'times',      // times = Anfang und Ende ziehen, duration = nur die Dauer
     wage: 0,                   // Stundenlohn in Euro, 0 = kein Geld anzeigen
     template: DEFAULT_TEMPLATE,
     warnHours: 12              // Vergessen-Warnung, 0 = aus
@@ -131,6 +132,9 @@ function snapDirs() {
 }
 
 function roundedRange(startISO, endISO) {
+  if (state.settings.roundTarget === 'duration') {
+    return { start: new Date(startISO), end: new Date(endISO) };
+  }
   const [ds, de] = snapDirs();
   const s = snap(new Date(startISO), ds);
   let e = snap(new Date(endISO), de);
@@ -138,10 +142,27 @@ function roundedRange(startISO, endISO) {
   return { start: s, end: e };
 }
 
+/** Rundet eine Dauer direkt aufs Raster, statt Anfang und Ende zu verschieben. */
+function roundDuration(min) {
+  const step = Number(state.settings.roundTo) || 0;
+  if (!step) return min;
+  const m = state.settings.roundMode;
+  const f = m === 'up' ? Math.ceil : m === 'down' ? Math.floor : Math.round;
+  return f(min / step) * step;
+}
+
+/** Was gemeldet wird: die Zeiten und die Minuten nach Rundung. */
+function reported(startISO, endISO) {
+  const r = roundedRange(startISO, endISO);
+  const min = state.settings.roundTarget === 'duration'
+    ? roundDuration((new Date(endISO) - new Date(startISO)) / 60000)
+    : (r.end - r.start) / 60000;
+  return { start: r.start, end: r.end, min: Math.max(0, min) };
+}
+
 /** Gemeldete Minuten eines Eintrags (nach Rundung). */
 function entryMin(e) {
-  const r = roundedRange(e.start, e.end);
-  return Math.max(0, (r.end - r.start) / 60000);
+  return reported(e.start, e.end).min;
 }
 
 /* ============================ nachricht ============================ */
@@ -159,8 +180,8 @@ const PLACEHOLDERS = {
 };
 
 function buildMessage(startISO, endISO, note) {
-  const r = roundedRange(startISO, endISO);
-  const ctx = { start: r.start, end: r.end, min: Math.max(0, (r.end - r.start) / 60000), note: note || '' };
+  const r = reported(startISO, endISO);
+  const ctx = { start: r.start, end: r.end, min: r.min, note: note || '' };
   const tpl = state.settings.template || DEFAULT_TEMPLATE;
   return tpl.replace(/\{[a-z_]+\}/g, (m) => (PLACEHOLDERS[m] ? PLACEHOLDERS[m](ctx) : m));
 }
@@ -242,7 +263,7 @@ function entryRow(e) {
   const btn = el('button', 'entry');
   btn.type = 'button';
 
-  const r = roundedRange(e.start, e.end);
+  const r = reported(e.start, e.end);
   const box = el('div', 'times');
   const range = el('div', 'range', `${clock(r.start)} – ${clock(r.end)}`);
   if (e.sent) range.appendChild(el('span', 'sent', '✓'));
@@ -397,18 +418,24 @@ function renderSettings() {
   $('#set-wage').value = state.settings.wage || '';
   $('#set-round').value = String(state.settings.roundTo);
   $('#set-roundmode').value = state.settings.roundMode;
+  $('#set-roundtarget').value = state.settings.roundTarget;
   $('#set-warn').value = String(state.settings.warnHours);
-  $('#row-roundmode').style.opacity = state.settings.roundTo ? 1 : .4;
+  ['#row-roundmode', '#row-roundtarget'].forEach((sel) => {
+    $(sel).style.opacity = state.settings.roundTo ? 1 : .4;
+  });
   $('#set-roundmode').disabled = !state.settings.roundTo;
+  $('#set-roundtarget').disabled = !state.settings.roundTo;
 
   // Beispiel mit krummer Schicht, damit der Modus sichtbar wird
   const base = startOfDay(new Date());
   const s = new Date(base.getTime() + (7 * 60 + 3) * 60000);
   const e = new Date(base.getTime() + (16 * 60 + 7) * 60000);
-  const r = roundedRange(s.toISOString(), e.toISOString());
-  $('#round-example').textContent = state.settings.roundTo
-    ? `07:03 – 16:07  wird zu  ${clock(r.start)} – ${clock(r.end)}  (${decHours((r.end - r.start) / 60000)} h)`
-    : '07:03 – 16:07 bleibt wie erfasst (9,07 h)';
+  const r = reported(s.toISOString(), e.toISOString());
+  $('#round-example').textContent =
+    !state.settings.roundTo ? '07:03 – 16:07 bleibt wie erfasst (9,07 h)'
+    : state.settings.roundTarget === 'duration'
+      ? `07:03 – 16:07 bleibt stehen, 9:04 wird zu ${decHours(r.min)} h`
+      : `07:03 – 16:07  wird zu  ${clock(r.start)} – ${clock(r.end)}  (${decHours(r.min)} h)`;
 
   if ($('#set-template').value !== state.settings.template) {
     $('#set-template').value = state.settings.template;
@@ -544,13 +571,14 @@ function updatePreview() {
   $('#send-wa').disabled = false;
   $('#msg-text').textContent = buildMessage(v.start.toISOString(), v.end.toISOString(), v.note);
 
-  const r = roundedRange(v.start.toISOString(), v.end.toISOString());
-  const min = Math.max(0, (r.end - r.start) / 60000);
-  $('#f-money').textContent = hasWage() ? money(min) : hm(min);
+  const r = reported(v.start.toISOString(), v.end.toISOString());
+  $('#f-money').textContent = hasWage() ? money(r.min) : hm(r.min);
 
-  const changed = r.start.getTime() !== v.start.getTime() || r.end.getTime() !== v.end.getTime();
-  $('#raw-note').textContent = changed
-    ? `gerundet · tatsächlich ${clock(v.start)} – ${clock(v.end)} (${hm((v.end - v.start) / 60000)} h)`
+  const rawMin = (v.end - v.start) / 60000;
+  const timesMoved = r.start.getTime() !== v.start.getTime() || r.end.getTime() !== v.end.getTime();
+  $('#raw-note').textContent =
+    timesMoved ? `gerundet · tatsächlich ${clock(v.start)} – ${clock(v.end)} (${hm(rawMin)} h)`
+    : Math.abs(r.min - rawMin) > 0.001 ? `Dauer gerundet · tatsächlich ${hm(rawMin)} h`
     : '';
 }
 
@@ -599,8 +627,8 @@ function buildCSV() {
   let total = 0;
 
   for (const e of sorted) {
-    const r = roundedRange(e.start, e.end);
-    const min = entryMin(e);
+    const r = reported(e.start, e.end);
+    const min = r.min;
     total += min;
     rows.push([
       fullDate(r.start),
@@ -1107,6 +1135,11 @@ function bind() {
   });
   $('#set-roundmode').addEventListener('change', (ev) => {
     state.settings.roundMode = ev.target.value;
+    save();
+    renderAll();
+  });
+  $('#set-roundtarget').addEventListener('change', (ev) => {
+    state.settings.roundTarget = ev.target.value;
     save();
     renderAll();
   });
