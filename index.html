@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Stunden</title>
+
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#4f46e5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f1020" media="(prefers-color-scheme: dark)">
+
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Stunden">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png">
+
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ================= TIMER ================= -->
+  <section class="view" id="view-timer">
+    <header class="head">
+      <h1>Heute</h1>
+      <p class="sub" id="today-date"></p>
+    </header>
+
+    <div class="clockcard">
+      <div class="clock" id="clock">0:00:00</div>
+      <div class="clock-label" id="clock-label">Nicht gestartet</div>
+      <button class="bigbtn start" id="toggle-btn">Start</button>
+      <input class="notefield" id="running-note" type="text" placeholder="Notiz (optional)" autocomplete="off" enterkeyhint="done">
+    </div>
+
+    <div class="stats">
+      <div class="stat">
+        <span class="stat-val" id="stat-today">0:00</span>
+        <span class="stat-key">Heute</span>
+      </div>
+      <div class="stat">
+        <span class="stat-val" id="stat-week">0:00</span>
+        <span class="stat-key">Diese Woche</span>
+      </div>
+      <div class="stat">
+        <span class="stat-val" id="stat-balance">±0:00</span>
+        <span class="stat-key">Saldo Woche</span>
+      </div>
+    </div>
+
+    <div class="section-head">
+      <h2>Einträge heute</h2>
+      <button class="linkbtn" id="add-today">+ Eintrag</button>
+    </div>
+    <div id="today-list" class="list"></div>
+  </section>
+
+  <!-- ================= VERLAUF ================= -->
+  <section class="view hidden" id="view-history">
+    <header class="head">
+      <h1>Verlauf</h1>
+      <p class="sub" id="week-range"></p>
+    </header>
+
+    <div class="weeknav">
+      <button class="navbtn" id="week-prev" aria-label="Vorherige Woche">‹</button>
+      <div class="weeksum">
+        <strong id="week-total">0:00</strong>
+        <span id="week-balance">±0:00</span>
+      </div>
+      <button class="navbtn" id="week-next" aria-label="Nächste Woche">›</button>
+    </div>
+
+    <div id="history-list" class="list"></div>
+
+    <div class="foot-actions">
+      <button class="ghostbtn" id="add-any">Eintrag hinzufügen</button>
+    </div>
+  </section>
+
+  <!-- ================= EINSTELLUNGEN ================= -->
+  <section class="view hidden" id="view-settings">
+    <header class="head">
+      <h1>Einstellungen</h1>
+      <p class="sub">Alles bleibt lokal auf diesem iPhone</p>
+    </header>
+
+    <h2 class="group-title">Rundung</h2>
+    <div class="card">
+      <label class="row">
+        <span>Raster</span>
+        <select id="set-round">
+          <option value="0">Nicht runden</option>
+          <option value="5">5 Minuten</option>
+          <option value="10">10 Minuten</option>
+          <option value="15">15 Minuten</option>
+          <option value="30">30 Minuten</option>
+        </select>
+      </label>
+      <label class="row" id="row-roundmode">
+        <span>Modus</span>
+        <select id="set-roundmode">
+          <option value="nearest">Kaufmännisch</option>
+          <option value="up">Aufrunden</option>
+          <option value="down">Abrunden</option>
+        </select>
+      </label>
+      <div class="row col">
+        <span class="mini">Beispiel</span>
+        <span class="example" id="round-example"></span>
+      </div>
+    </div>
+
+    <h2 class="group-title">Soll-Zeit</h2>
+    <div class="card">
+      <label class="row">
+        <span>Stunden pro Arbeitstag</span>
+        <input type="number" id="set-target" inputmode="decimal" step="0.25" min="0" max="24">
+      </label>
+      <div class="row col">
+        <span class="mini">Arbeitstage</span>
+        <div class="days" id="set-days"></div>
+      </div>
+    </div>
+
+    <h2 class="group-title">Daten</h2>
+    <div class="card">
+      <button class="rowbtn" id="export-csv">Export als CSV</button>
+      <button class="rowbtn" id="export-json">Backup sichern (JSON)</button>
+      <button class="rowbtn" id="import-json">Backup einspielen</button>
+      <button class="rowbtn danger" id="wipe">Alle Daten löschen</button>
+    </div>
+
+    <p class="hint" id="storage-hint"></p>
+  </section>
+
+  <!-- ================= TABS ================= -->
+  <nav class="tabs">
+    <button class="tab active" data-view="timer"><span class="ico">⏱</span><span>Timer</span></button>
+    <button class="tab" data-view="history"><span class="ico">▤</span><span>Verlauf</span></button>
+    <button class="tab" data-view="settings"><span class="ico">⚙</span><span>Mehr</span></button>
+  </nav>
+</div>
+
+<!-- ================= EINTRAGS-SHEET ================= -->
+<div class="sheet-wrap hidden" id="sheet">
+  <div class="sheet-bg" data-close></div>
+  <div class="sheet">
+    <div class="sheet-head">
+      <button class="linkbtn" data-close>Abbrechen</button>
+      <strong id="sheet-title">Eintrag</strong>
+      <button class="linkbtn strong" id="sheet-save">Sichern</button>
+    </div>
+    <div class="sheet-body">
+      <p class="hint hidden" id="sheet-intro">Timer gestoppt. Zeiten passen? Sonst hier korrigieren.</p>
+
+      <div class="card">
+        <label class="row"><span>Datum</span><input type="date" id="f-date"></label>
+        <label class="row"><span>Beginn</span><input type="time" id="f-start"></label>
+        <label class="row"><span>Ende</span><input type="time" id="f-end"></label>
+        <label class="row"><span>Notiz</span><input type="text" id="f-note" placeholder="optional" autocomplete="off"></label>
+      </div>
+
+      <div class="preview" id="msg-preview">
+        <span class="mini">Nachricht</span>
+        <code id="msg-text">–</code>
+        <span class="mini rounded-note" id="raw-note"></span>
+      </div>
+
+      <button class="wabtn" id="send-wa">Per WhatsApp senden</button>
+      <button class="rowbtn plain" id="copy-msg">Nur Text kopieren</button>
+      <button class="rowbtn danger plain hidden" id="sheet-delete">Eintrag löschen</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= EXPORT-SHEET ================= -->
+<div class="sheet-wrap hidden" id="exsheet">
+  <div class="sheet-bg" data-exclose></div>
+  <div class="sheet">
+    <div class="sheet-head">
+      <button class="linkbtn" data-exclose>Schließen</button>
+      <strong id="ex-title">Export</strong>
+      <button class="linkbtn strong" id="ex-copy">Kopieren</button>
+    </div>
+    <div class="sheet-body">
+      <p class="hint">Über „Teilen“ als Datei sichern, oder den Text kopieren.</p>
+      <button class="rowbtn plain" id="ex-share">Teilen …</button>
+      <textarea id="ex-text" readonly spellcheck="false"></textarea>
+    </div>
+  </div>
+</div>
+
+<div class="toast hidden" id="toast"></div>
+<input type="file" id="import-file" accept="application/json,.json" hidden>
+
+<script src="app.js"></script>
+</body>
+</html>
