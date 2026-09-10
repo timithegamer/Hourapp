@@ -16,6 +16,7 @@ const DEFAULTS = {
     wage: 0,                   // Stundenlohn in Euro, 0 = kein Geld anzeigen
     template: DEFAULT_TEMPLATE,
     warnHours: 12,             // Vergessen-Warnung, 0 = aus
+    hourFormat: 'dec',         // dec = 8,5 h    hm = 8:30
     backupDays: 14,            // Backup-Erinnerung nach x Tagen, 0 = aus
     lastBackup: null           // ISO-Zeitpunkt des letzten gesicherten Backups
   }
@@ -101,8 +102,52 @@ function decHours(min) {
   return (min / 60).toFixed(2).replace(/0+$/, '').replace(/\.$/, '').replace('.', ',');
 }
 
+/** Stunden fuer die Oberflaeche, je nach Einstellung "8,5 h" oder "8:30". */
+function fmtH(min) {
+  return state.settings.hourFormat === 'hm' ? hm(min) : decHours(min) + ' h';
+}
+
+/** Wie fmtH, aber ohne Einheit - fuer enge Stellen wie die Kalenderzellen. */
+function fmtHShort(min) {
+  return state.settings.hourFormat === 'hm' ? hm(min) : decHours(min);
+}
+
 function fmtDate(d, opts) {
   return d.toLocaleDateString('de-DE', opts || { weekday: 'long', day: '2-digit', month: 'long' });
+}
+
+/* ============================ uhrzeit-eingabe ============================ */
+
+/**
+ * Nimmt getippte Uhrzeiten in allen ueblichen Schreibweisen entgegen:
+ * "7", "730", "7:30", "07.30", "0730" werden alle zu "07:30".
+ */
+function parseClockInput(raw) {
+  const digits = String(raw == null ? '' : raw).replace(/\D/g, '');
+  if (!digits || digits.length > 4) return null;
+
+  let h, m;
+  if (digits.length <= 2) { h = Number(digits); m = 0; }
+  else { h = Number(digits.slice(0, digits.length - 2)); m = Number(digits.slice(-2)); }
+
+  if (!isFinite(h) || !isFinite(m) || h > 23 || m > 59) return null;
+  return pad(h) + ':' + pad(m);
+}
+
+/** Liest ein Uhrzeitfeld, ohne es anzufassen. */
+const clockValue = (sel) => parseClockInput($(sel).value);
+
+/** Schreibt die aufgeraeumte Schreibweise zurueck ins Feld. */
+function tidyClockField(sel) {
+  const node = $(sel);
+  const v = parseClockInput(node.value);
+  node.classList.toggle('bad', !v && node.value.trim() !== '');
+  if (v) node.value = v;
+}
+
+function setClockField(sel, hhmm) {
+  $(sel).value = hhmm;
+  $(sel).classList.remove('bad');
 }
 
 /* ============================ geld ============================ */
@@ -311,7 +356,7 @@ function entryRow(e) {
   if (e.note) box.appendChild(el('div', 'note', e.note));
 
   const right = el('div');
-  right.appendChild(el('div', 'dur', hm(entryMin(e))));
+  right.appendChild(el('div', 'dur', fmtH(entryMin(e))));
   if (hasWage()) right.appendChild(el('div', 'stat-money', money(entryMin(e))));
 
   btn.append(box, right);
@@ -324,7 +369,7 @@ function runningRow() {
   const box = el('div', 'times');
   box.appendChild(el('div', 'range', `${clock(new Date(state.running.start))} – läuft`));
   if (state.running.note) box.appendChild(el('div', 'note', state.running.note));
-  div.append(box, el('div', 'dur', hm(runningSeconds() / 60)));
+  div.append(box, el('div', 'dur', fmtH(runningSeconds() / 60)));
   return div;
 }
 
@@ -336,7 +381,7 @@ function card(children) {
 
 function statTile(label, min) {
   const t = el('div', 'stat');
-  t.appendChild(el('span', 'stat-val', hm(min)));
+  t.appendChild(el('span', 'stat-val', fmtH(min)));
   t.appendChild(el('span', 'stat-key', label));
   if (hasWage()) t.appendChild(el('span', 'stat-money', money(min)));
   return t;
@@ -391,7 +436,7 @@ function paintWarnBanner() {
   $('#forgot-banner').classList.toggle('hidden', !show);
   if (show) {
     $('#forgot-text').textContent =
-      `Der Timer läuft seit ${hm(runningSeconds() / 60)} Stunden. Vergessen zu stoppen?`;
+      `Der Timer läuft seit ${fmtH(runningSeconds() / 60)}. Vergessen zu stoppen?`;
   }
 }
 
@@ -470,7 +515,7 @@ function renderCalendar(monthStart) {
 
     cell.appendChild(el('span', 'cal-num', String(n)));
     if (items.length) {
-      cell.appendChild(el('span', 'cal-h', hm(min)));
+      cell.appendChild(el('span', 'cal-h', fmtHShort(min)));
       const open = items.some((e) => !e.sent);
       cell.appendChild(el('span', 'cal-dot' + (open ? ' open' : '')));
     }
@@ -497,8 +542,9 @@ function renderHistory() {
   $('#per-next').style.opacity = periodOffset >= 0 ? .35 : 1;
 
   const min = sumRange(from, to);
-  $('#period-hours').textContent = hm(min);
+  $('#period-hours').textContent = fmtH(min);
   $('#period-money').textContent = hasWage() ? money(min) : decHours(min) + ' Stunden';
+  $('#period-money').classList.toggle('hidden', !hasWage() && state.settings.hourFormat === 'dec');
 
   const showCal = period === 'month';
   $('#calendar').classList.toggle('hidden', !showCal);
@@ -556,7 +602,7 @@ function renderHistory() {
     const dayMin = (onlyOpen || selectedDay)
       ? byDay.get(k).reduce((sum, e) => sum + entryMin(e), 0)
       : sumRange(startOfDay(day), addDays(startOfDay(day), 1));
-    right.appendChild(el('span', 'dsum', hm(dayMin)));
+    right.appendChild(el('span', 'dsum', fmtH(dayMin)));
     if (hasWage()) right.appendChild(el('span', 'dbal', money(dayMin)));
     head.append(right);
     group.appendChild(head);
@@ -582,6 +628,7 @@ function renderSettings() {
   $('#set-roundmode').value = state.settings.roundMode;
   $('#set-roundtarget').value = state.settings.roundTarget;
   $('#set-warn').value = String(state.settings.warnHours);
+  $('#set-hourformat').value = state.settings.hourFormat;
   $('#set-backup-days').value = String(state.settings.backupDays);
 
   const days = daysSinceBackup();
@@ -676,7 +723,7 @@ function tick() {
   paintQuickStats();
   paintWarnBanner();
   document.querySelectorAll('.entry.live .dur').forEach((n) => {
-    n.textContent = hm(runningSeconds() / 60);
+    n.textContent = fmtH(runningSeconds() / 60);
   });
 }
 
@@ -688,9 +735,10 @@ const QUICK_STEPS = [-30, -15, -10, -5, 5, 15];
  * Setzt einen Uhrzeit-Wert auf den passenden Tag: eine Zeit, die heute noch
  * bevorsteht, war der Vortag - so bleibt eine Schicht ueber Mitternacht heil.
  */
-function startFromClock(hhmm) {
-  const [h, m] = String(hhmm).split(':').map(Number);
-  if (!isFinite(h) || !isFinite(m)) return null;
+function startFromClock(value) {
+  const hhmm = parseClockInput(value);
+  if (!hhmm) return null;
+  const [h, m] = hhmm.split(':').map(Number);
   const now = new Date();
   const d = new Date(now);
   d.setHours(h, m, 0, 0);
@@ -699,7 +747,7 @@ function startFromClock(hhmm) {
 
 function openStartSheet() {
   if (!state.running) return;
-  $('#f-runstart').value = clock(new Date(state.running.start));
+  setClockField('#f-runstart', clock(new Date(state.running.start)));
 
   const box = $('#start-quick');
   box.textContent = '';
@@ -719,7 +767,7 @@ function shiftStartField(min) {
   if (!cur) return;
   const next = new Date(cur.getTime() + min * 60000);
   if (next > new Date()) { toast('Der Beginn kann nicht in der Zukunft liegen'); return; }
-  $('#f-runstart').value = clock(next);
+  setClockField('#f-runstart', clock(next));
   updateStartPreview();
 }
 
@@ -727,7 +775,7 @@ function updateStartPreview() {
   const d = startFromClock($('#f-runstart').value);
   // auf volle Minuten runden, damit Dauer und Geld in der Vorschau zusammenpassen
   const min = d ? Math.round((Date.now() - d) / 60000) : 0;
-  $('#run-preview').textContent = d ? hm(min) : '–';
+  $('#run-preview').textContent = d ? fmtH(min) : '–';
   $('#row-runmoney').classList.toggle('hidden', !hasWage());
   if (hasWage()) $('#run-money').textContent = money(min);
 }
@@ -763,15 +811,15 @@ function openSheet(id, preset, justStopped) {
   if (e) {
     const s = new Date(e.start), en = new Date(e.end);
     $('#f-date').value = dayKey(s);
-    $('#f-start').value = clock(s);
-    $('#f-end').value = clock(en);
+    setClockField('#f-start', clock(s));
+    setClockField('#f-end', clock(en));
     $('#f-note').value = e.note || '';
   } else {
     const p = preset || {};
     const d = p.date || new Date();
     $('#f-date').value = dayKey(d);
-    $('#f-start').value = p.start || '07:00';
-    $('#f-end').value = p.end || '16:00';
+    setClockField('#f-start', p.start || '07:00');
+    setClockField('#f-end', p.end || '16:00');
     $('#f-note').value = p.note || '';
   }
 
@@ -798,8 +846,8 @@ function cancelSheet() {
 /** Liest das Formular. Ein Ende vor dem Beginn gilt als Folgetag (Nachtschicht). */
 function readSheet() {
   const date = $('#f-date').value;
-  const a = $('#f-start').value;
-  const b = $('#f-end').value;
+  const a = clockValue('#f-start');
+  const b = clockValue('#f-end');
   if (!date || !a || !b) return null;
 
   const start = new Date(`${date}T${a}:00`);
@@ -823,13 +871,13 @@ function updatePreview() {
   $('#msg-text').textContent = buildMessage(v.start.toISOString(), v.end.toISOString(), v.note);
 
   const r = reported(v.start.toISOString(), v.end.toISOString());
-  $('#f-money').textContent = hasWage() ? money(r.min) : hm(r.min);
+  $('#f-money').textContent = hasWage() ? money(r.min) : fmtH(r.min);
 
   const rawMin = (v.end - v.start) / 60000;
   const timesMoved = r.start.getTime() !== v.start.getTime() || r.end.getTime() !== v.end.getTime();
   $('#raw-note').textContent =
-    timesMoved ? `gerundet · tatsächlich ${clock(v.start)} – ${clock(v.end)} (${hm(rawMin)} h)`
-    : Math.abs(r.min - rawMin) > 0.001 ? `Dauer gerundet · tatsächlich ${hm(rawMin)} h`
+    timesMoved ? `gerundet · tatsächlich ${clock(v.start)} – ${clock(v.end)} (${fmtH(rawMin)})`
+    : Math.abs(r.min - rawMin) > 0.001 ? `Dauer gerundet · tatsächlich ${fmtH(rawMin)}`
     : '';
 }
 
@@ -1113,7 +1161,7 @@ function openImportSheet(result) {
     const row = el('div', 'improw');
     const s = new Date(e.start), en = new Date(e.end);
     row.appendChild(el('span', null, `${fullDate(s)}  ${clock(s)} – ${clock(en)}`));
-    row.appendChild(el('span', 'dur', hm(entryMin(e))));
+    row.appendChild(el('span', 'dur', fmtH(entryMin(e))));
     box.appendChild(row);
   });
   if (entries.length > 12) {
@@ -1308,6 +1356,10 @@ function bind() {
   $('#start-save').addEventListener('click', saveStartSheet);
   $('#f-runstart').addEventListener('input', updateStartPreview);
   $('#f-runstart').addEventListener('change', updateStartPreview);
+  $('#f-runstart').addEventListener('blur', () => {
+    tidyClockField('#f-runstart');
+    updateStartPreview();
+  });
   document.querySelectorAll('[data-startclose]').forEach((n) =>
     n.addEventListener('click', () => $('#startsheet').classList.add('hidden')));
 
@@ -1383,6 +1435,9 @@ function bind() {
     $(sel).addEventListener('input', updatePreview);
     $(sel).addEventListener('change', updatePreview);
   });
+  ['#f-start', '#f-end'].forEach((sel) => {
+    $(sel).addEventListener('blur', () => { tidyClockField(sel); updatePreview(); });
+  });
 
   $('#send-wa').addEventListener('click', () => {
     const entry = commitSheet();
@@ -1442,6 +1497,11 @@ function bind() {
   });
   $('#set-roundtarget').addEventListener('change', (ev) => {
     state.settings.roundTarget = ev.target.value;
+    save();
+    renderAll();
+  });
+  $('#set-hourformat').addEventListener('change', (ev) => {
+    state.settings.hourFormat = ev.target.value === 'hm' ? 'hm' : 'dec';
     save();
     renderAll();
   });

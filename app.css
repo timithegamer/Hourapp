@@ -569,3 +569,11 @@ h2 { font-size: 15px; margin: 0; font-weight: 600; }
   cursor: pointer;
 }
 .quick button:active { opacity: .6; }
+
+/* ---------- tippbare uhrzeit ---------- */
+.timefield {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .02em;
+}
+.timefield::placeholder { color: var(--muted); opacity: .6; }
+.timefield.bad { color: var(--bad); }

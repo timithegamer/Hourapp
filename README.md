@@ -17,6 +17,8 @@ kein Tracking.
 - Nach dem Stopp öffnet sich sofort die Korrektur-Maske
 - Warnung, wenn der Timer ungewöhnlich lange läuft, weil du das Stoppen vergessen hast
 - Einträge von Hand anlegen, auch Nachtschichten über Mitternacht
+- Uhrzeiten werden getippt, nicht gescrollt: `7`, `703`, `7:30`, `0730` und
+  `20.45` werden alle richtig verstanden
 - „Wie letztes Mal“ übernimmt die Zeiten des letzten Eintrags
 
 **Melden**
@@ -27,6 +29,7 @@ kein Tracking.
   bietet an, sie als eine Nachricht zu senden oder einzeln durchzugehen
 
 **Auswerten**
+- Stunden überall als Dezimalzahl (`8,75 h`), umschaltbar auf `8:45`
 - Stunden und Verdienst für Tag, Woche, Monat oder gesamt
 - Monatskalender: jeder Tag mit seinen Stunden, grüner Punkt heißt gemeldet,
   oranger heißt offen. Einen Tag antippen zeigt nur dessen Einträge, ein leerer

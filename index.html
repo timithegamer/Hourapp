@@ -124,6 +124,20 @@
       </div>
     </div>
 
+    <h2 class="group-title">Anzeige</h2>
+    <div class="card">
+      <label class="row">
+        <span>Stunden anzeigen als</span>
+        <select id="set-hourformat">
+          <option value="dec">8,5 h</option>
+          <option value="hm">8:30</option>
+        </select>
+      </label>
+      <div class="row col">
+        <span class="mini">Betrifft Listen, Summen und den Kalender. Die laufende Uhr zählt weiter in Stunden, Minuten und Sekunden.</span>
+      </div>
+    </div>
+
     <h2 class="group-title">Rundung</h2>
     <div class="card">
       <label class="row">
@@ -253,8 +267,8 @@
 
       <div class="card">
         <label class="row"><span>Datum</span><input type="date" id="f-date"></label>
-        <label class="row"><span>Beginn</span><input type="time" id="f-start"></label>
-        <label class="row"><span>Ende</span><input type="time" id="f-end"></label>
+        <label class="row"><span>Beginn</span><input class="timefield" id="f-start" type="text" inputmode="numeric" maxlength="5" placeholder="07:00" autocomplete="off"></label>
+        <label class="row"><span>Ende</span><input class="timefield" id="f-end" type="text" inputmode="numeric" maxlength="5" placeholder="16:00" autocomplete="off"></label>
         <label class="row"><span>Notiz</span><input type="text" id="f-note" placeholder="optional" autocomplete="off"></label>
         <div class="row"><span>Verdienst</span><strong id="f-money">–</strong></div>
       </div>
@@ -286,7 +300,7 @@
       <p class="hint">Zu spät eingestempelt? Zieh den Beginn zurück, die Uhr rechnet sofort neu.</p>
       <div class="quick" id="start-quick"></div>
       <div class="card">
-        <label class="row"><span>Beginn</span><input type="time" id="f-runstart"></label>
+        <label class="row"><span>Beginn</span><input class="timefield" id="f-runstart" type="text" inputmode="numeric" maxlength="5" placeholder="07:00" autocomplete="off"></label>
         <div class="row"><span>Läuft dann seit</span><strong id="run-preview">0:00</strong></div>
         <div class="row" id="row-runmoney"><span>Verdienst bisher</span><strong id="run-money">–</strong></div>
       </div>
