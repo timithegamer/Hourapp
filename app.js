@@ -152,6 +152,24 @@ function setClockField(sel, hhmm) {
 
 /* ============================ geld ============================ */
 
+/**
+ * Nimmt Dezimalzahlen mit Komma oder Punkt an. Ein type="number"-Feld kann das
+ * nicht: es meldet bei getipptem Komma einen leeren Wert zurueck, und auf einer
+ * deutschen Tastatur ist das Komma genau die Taste, die angeboten wird.
+ */
+function parseDecimal(raw) {
+  const s = String(raw == null ? '' : raw).trim().replace(/\s|€/g, '').replace(',', '.');
+  if (!s || !/^\d*\.?\d*$/.test(s)) return null;
+  const n = Number(s);
+  return isFinite(n) && n >= 0 ? n : null;
+}
+
+/** Zahl in deutscher Schreibweise, ohne unnoetige Nachkommastellen. */
+function decimalText(n) {
+  if (!n) return '';
+  return String(n).replace('.', ',');
+}
+
 const hasWage = () => (Number(state.settings.wage) || 0) > 0;
 
 function money(min) {
@@ -623,7 +641,10 @@ function renderHistory() {
 }
 
 function renderSettings() {
-  $('#set-wage').value = state.settings.wage || '';
+  if (parseDecimal($('#set-wage').value) !== (state.settings.wage || null)) {
+    $('#set-wage').value = decimalText(state.settings.wage);
+  }
+  $('#set-wage').classList.remove('bad');
   $('#set-round').value = String(state.settings.roundTo);
   $('#set-roundmode').value = state.settings.roundMode;
   $('#set-roundtarget').value = state.settings.roundTarget;
@@ -1478,13 +1499,18 @@ function bind() {
     if (lastExport && lastExport.isBackup) markBackupDone();
   });
 
-  $('#set-wage').addEventListener('change', (ev) => {
-    const v = Number(String(ev.target.value).replace(',', '.'));
-    state.settings.wage = isFinite(v) && v > 0 ? v : 0;
-    ev.target.value = state.settings.wage || '';
+  const commitWage = (ev) => {
+    const raw = String(ev.target.value).trim();
+    const v = parseDecimal(raw);
+    if (v === null && raw !== '') { ev.target.classList.add('bad'); return; }
+    ev.target.classList.remove('bad');
+    state.settings.wage = v && v > 0 ? Math.round(v * 100) / 100 : 0;
+    ev.target.value = decimalText(state.settings.wage);
     save();
     renderAll();
-  });
+  };
+  $('#set-wage').addEventListener('change', commitWage);
+  $('#set-wage').addEventListener('blur', commitWage);
   $('#set-round').addEventListener('change', (ev) => {
     state.settings.roundTo = Number(ev.target.value) || 0;
     save();

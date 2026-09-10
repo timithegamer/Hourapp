@@ -576,4 +576,4 @@ h2 { font-size: 15px; margin: 0; font-weight: 600; }
   letter-spacing: .02em;
 }
 .timefield::placeholder { color: var(--muted); opacity: .6; }
-.timefield.bad { color: var(--bad); }
+.timefield.bad, .suffixed input.bad { color: var(--bad); }
