@@ -11,6 +11,9 @@ kein Tracking.
 
 **Zeit erfassen**
 - Start/Stopp-Timer, läuft weiter wenn du die App schließt oder das iPhone sperrst
+- Beginn eines laufenden Timers nachträglich korrigieren: auf „Läuft seit …“
+  tippen, per Schnellknopf oder Uhrzeit zurückziehen. Uhr, Tagessumme und
+  Verdienst rechnen sofort neu
 - Nach dem Stopp öffnet sich sofort die Korrektur-Maske
 - Warnung, wenn der Timer ungewöhnlich lange läuft, weil du das Stoppen vergessen hast
 - Einträge von Hand anlegen, auch Nachtschichten über Mitternacht

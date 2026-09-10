@@ -402,9 +402,11 @@ function renderTimer() {
   const running = !!state.running;
   $('#clock').textContent = hms(runningSeconds());
   $('#clock-label').textContent = running
-    ? 'Läuft seit ' + clock(new Date(state.running.start))
+    ? 'Läuft seit ' + clock(new Date(state.running.start)) + '  ·  ändern'
     : 'Nicht gestartet';
   $('#clock-money').textContent = running && hasWage() ? money(runningSeconds() / 60) : '';
+
+  $('#clock-label').classList.toggle('editable', running);
 
   const btn = $('#toggle-btn');
   btn.textContent = running ? 'Stopp' : 'Start';
@@ -676,6 +678,72 @@ function tick() {
   document.querySelectorAll('.entry.live .dur').forEach((n) => {
     n.textContent = hm(runningSeconds() / 60);
   });
+}
+
+/* ==================== beginn des laufenden timers ==================== */
+
+const QUICK_STEPS = [-30, -15, -10, -5, 5, 15];
+
+/**
+ * Setzt einen Uhrzeit-Wert auf den passenden Tag: eine Zeit, die heute noch
+ * bevorsteht, war der Vortag - so bleibt eine Schicht ueber Mitternacht heil.
+ */
+function startFromClock(hhmm) {
+  const [h, m] = String(hhmm).split(':').map(Number);
+  if (!isFinite(h) || !isFinite(m)) return null;
+  const now = new Date();
+  const d = new Date(now);
+  d.setHours(h, m, 0, 0);
+  return d > now ? addDays(d, -1) : d;
+}
+
+function openStartSheet() {
+  if (!state.running) return;
+  $('#f-runstart').value = clock(new Date(state.running.start));
+
+  const box = $('#start-quick');
+  box.textContent = '';
+  QUICK_STEPS.forEach((min) => {
+    const b = el('button', null, (min > 0 ? '+' : '−') + Math.abs(min) + ' min');
+    b.type = 'button';
+    b.addEventListener('click', () => shiftStartField(min));
+    box.appendChild(b);
+  });
+
+  updateStartPreview();
+  $('#startsheet').classList.remove('hidden');
+}
+
+function shiftStartField(min) {
+  const cur = startFromClock($('#f-runstart').value);
+  if (!cur) return;
+  const next = new Date(cur.getTime() + min * 60000);
+  if (next > new Date()) { toast('Der Beginn kann nicht in der Zukunft liegen'); return; }
+  $('#f-runstart').value = clock(next);
+  updateStartPreview();
+}
+
+function updateStartPreview() {
+  const d = startFromClock($('#f-runstart').value);
+  // auf volle Minuten runden, damit Dauer und Geld in der Vorschau zusammenpassen
+  const min = d ? Math.round((Date.now() - d) / 60000) : 0;
+  $('#run-preview').textContent = d ? hm(min) : '–';
+  $('#row-runmoney').classList.toggle('hidden', !hasWage());
+  if (hasWage()) $('#run-money').textContent = money(min);
+}
+
+function saveStartSheet() {
+  if (!state.running) { $('#startsheet').classList.add('hidden'); return; }
+  const d = startFromClock($('#f-runstart').value);
+  if (!d) { toast('Bitte eine Uhrzeit angeben'); return; }
+  if (d > new Date()) { toast('Der Beginn kann nicht in der Zukunft liegen'); return; }
+
+  state.running.start = d.toISOString();
+  warnDismissed = false;
+  save();
+  renderAll();
+  $('#startsheet').classList.add('hidden');
+  toast('Beginn auf ' + clock(d) + ' gesetzt');
 }
 
 /* ============================ eintrags-sheet ============================ */
@@ -1226,7 +1294,8 @@ function showView(name) {
 }
 
 function anySheetOpen() {
-  return ['#sheet', '#exsheet', '#impsheet'].some((s) => !$(s).classList.contains('hidden'));
+  return ['#sheet', '#exsheet', '#impsheet', '#startsheet']
+    .some((s) => !$(s).classList.contains('hidden'));
 }
 
 function bind() {
@@ -1234,6 +1303,13 @@ function bind() {
   $('#running-note').addEventListener('input', (ev) => {
     if (state.running) { state.running.note = ev.target.value.trim(); save(); }
   });
+
+  $('#clock-label').addEventListener('click', openStartSheet);
+  $('#start-save').addEventListener('click', saveStartSheet);
+  $('#f-runstart').addEventListener('input', updateStartPreview);
+  $('#f-runstart').addEventListener('change', updateStartPreview);
+  document.querySelectorAll('[data-startclose]').forEach((n) =>
+    n.addEventListener('click', () => $('#startsheet').classList.add('hidden')));
 
   $('#backup-now').addEventListener('click', () => {
     showView('settings');

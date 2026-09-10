@@ -47,7 +47,7 @@
 
     <div class="clockcard">
       <div class="clock" id="clock">0:00:00</div>
-      <div class="clock-label" id="clock-label">Nicht gestartet</div>
+      <button class="clock-label" id="clock-label" type="button">Nicht gestartet</button>
       <div class="clock-money" id="clock-money"></div>
       <button class="bigbtn start" id="toggle-btn">Start</button>
       <input class="notefield" id="running-note" type="text" placeholder="Notiz (optional)" autocomplete="off" enterkeyhint="done">
@@ -269,6 +269,27 @@
       <button class="rowbtn plain" id="copy-msg">Nur Text kopieren</button>
       <button class="rowbtn plain" id="toggle-sent">Als gemeldet markieren</button>
       <button class="rowbtn danger plain hidden" id="sheet-delete">Eintrag löschen</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= BEGINN-KORREKTUR ================= -->
+<div class="sheet-wrap hidden" id="startsheet">
+  <div class="sheet-bg" data-startclose></div>
+  <div class="sheet">
+    <div class="sheet-head">
+      <button class="linkbtn" data-startclose>Abbrechen</button>
+      <strong>Beginn ändern</strong>
+      <button class="linkbtn strong" id="start-save">Sichern</button>
+    </div>
+    <div class="sheet-body">
+      <p class="hint">Zu spät eingestempelt? Zieh den Beginn zurück, die Uhr rechnet sofort neu.</p>
+      <div class="quick" id="start-quick"></div>
+      <div class="card">
+        <label class="row"><span>Beginn</span><input type="time" id="f-runstart"></label>
+        <div class="row"><span>Läuft dann seit</span><strong id="run-preview">0:00</strong></div>
+        <div class="row" id="row-runmoney"><span>Verdienst bisher</span><strong id="run-money">–</strong></div>
+      </div>
     </div>
   </div>
 </div>

@@ -74,7 +74,26 @@ h2 { font-size: 15px; margin: 0; font-weight: 600; }
   letter-spacing: -.02em;
   line-height: 1.05;
 }
-.clock-label { font-size: 13px; opacity: .82; margin-top: 4px; min-height: 18px; }
+.clock-label {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  opacity: .82;
+  margin-top: 4px;
+  min-height: 18px;
+  padding: 2px 0;
+}
+.clock-label.editable {
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.clock-label.editable:active { opacity: .55; }
 
 .bigbtn {
   margin-top: 16px;
@@ -530,3 +549,23 @@ h2 { font-size: 15px; margin: 0; font-weight: 600; }
   cursor: pointer;
 }
 .daysel::after { content: 'ganzer Monat'; font-weight: 400; font-size: 13px; }
+
+/* ---------- schnellkorrektur des beginns ---------- */
+.quick {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.quick button {
+  padding: 13px 0;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--accent);
+  font: inherit;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.quick button:active { opacity: .6; }
